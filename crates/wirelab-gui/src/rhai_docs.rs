@@ -24,7 +24,9 @@ const SECTIONS: &[(&str, &str)] = &[
          Messages route host-side (through WireLab), so they work across any \
          mix of simulator, USB and Wi-Fi sessions. Both boards must be \
          connected; the console reports drops. The name is the tab's name, \
-         case-insensitive.",
+         case-insensitive; send_board(\"*\", ...) broadcasts to every other \
+         live board. The Flow tab has matching nodes: 'on board message', \
+         'text equals' and 'send to board'.",
     ),
     (
         "Flow graphs (no-code scripts)",

@@ -28,6 +28,7 @@ impl WireLabApp {
             .resizable(true)
             .default_size(185.0)
             .show(ui, |ui| self.ide_side(ui));
+        egui::Panel::bottom("ide-status").show(ui, |ui| self.ide_status_bar(ui));
         if self.ide.bottom_open {
             egui::Panel::bottom("ide-bottom")
                 .resizable(true)
@@ -71,6 +72,7 @@ impl WireLabApp {
                     IdeTab::Comp(id) => names.get(id).cloned().unwrap_or_else(|| "?".into()),
                     IdeTab::Info(k) => format!("ℹ {k}"),
                     IdeTab::Flow => format!("{} flow", egui_phosphor::regular::GRAPH),
+                    IdeTab::Program => format!("{} rules", egui_phosphor::regular::LIST_CHECKS),
                 };
                 if ui.add(egui::Button::selectable(self.ide.active == i, title)).clicked() {
                     self.ide.active = i;
@@ -205,6 +207,38 @@ impl WireLabApp {
 
     fn ide_tree(&mut self, ui: &mut egui::Ui) {
         ScrollArea::vertical().id_salt("ide-tree-scroll").show(ui, |ui| {
+            ui.label(RichText::new("BOARD").small().color(Color32::from_gray(120)));
+            let active = self.project.active;
+            let mut switch: Option<usize> = None;
+            egui::ComboBox::from_id_salt("ide-board-pick")
+                .width(ui.available_width() - 8.0)
+                .selected_text(format!(
+                    "{}{}",
+                    if self.live.connected() { "● " } else { "" },
+                    self.project.active_name()
+                ))
+                .show_ui(ui, |ui| {
+                    for (i, tab) in self.project.boards.iter().enumerate() {
+                        let is_live = if i == active {
+                            self.live.connected()
+                        } else {
+                            self.background.get(&tab.id).is_some_and(|b| b.live.connected())
+                        };
+                        let label = format!(
+                            "{}{}  ·  {}",
+                            if is_live { "● " } else { "" },
+                            tab.name,
+                            tab.circuit.board_id
+                        );
+                        if ui.selectable_label(i == active, label).clicked() {
+                            switch = Some(i);
+                        }
+                    }
+                });
+            if let Some(i) = switch {
+                self.switch_board(i);
+            }
+            ui.add_space(6.0);
             ui.label(RichText::new("PROGRAM").small().color(Color32::from_gray(120)));
             let flow_n = self.project.flow.nodes.len();
             let flow_label = if flow_n == 0 {
@@ -221,6 +255,22 @@ impl WireLabApp {
                 .clicked()
             {
                 self.open_flow_tab();
+            }
+            let rule_n = self.project.program.rules.len();
+            let rules_label = if rule_n == 0 {
+                format!("{} rules program", egui_phosphor::regular::LIST_CHECKS)
+            } else {
+                format!("{} rules program ({rule_n})", egui_phosphor::regular::LIST_CHECKS)
+            };
+            if ui
+                .add(egui::Button::selectable(
+                    matches!(self.ide.tabs.get(self.ide.active), Some(IdeTab::Program)),
+                    rules_label,
+                ))
+                .on_hover_text("trigger → action rules; runs with the Run button in the device bar")
+                .clicked()
+            {
+                self.open_program_tab();
             }
             ui.add_space(6.0);
             ui.label(RichText::new("HARDWARE").small().color(Color32::from_gray(120)));
@@ -301,7 +351,7 @@ impl WireLabApp {
 
     fn ide_side(&mut self, ui: &mut egui::Ui) {
         ScrollArea::vertical().id_salt("ide-side-scroll").show(ui, |ui| {
-            ui.label(RichText::new("FUNCTIONS").small().color(Color32::from_gray(120)));
+            ui.label(RichText::new("OUTLINE").small().color(Color32::from_gray(120)));
             if self.active_comp().is_some() {
                 let fns: Vec<(usize, String)> = self
                     .script_ed
@@ -327,7 +377,35 @@ impl WireLabApp {
                     }
                 }
             } else {
-                ui.label(RichText::new("—").weak());
+                ui.label(RichText::new("open a script to see its functions").small().weak());
+            }
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.label(RichText::new("SNIPPETS").small().color(Color32::from_gray(120)));
+            let editing = self.active_comp().is_some();
+            if !editing {
+                ui.label(
+                    RichText::new("everything this board can do —\nopen a script, click to insert")
+                        .small()
+                        .weak(),
+                );
+            }
+            if let Some(board) = self.lib.board(&self.project.circuit.board_id) {
+                for sn in crate::ide_snippets::snippets_for(board) {
+                    let btn = ui.add_enabled(
+                        editing,
+                        egui::Button::new(RichText::new(sn.title)).small(),
+                    );
+                    if btn.clicked() {
+                        self.ide.pending_snippet = Some(sn.code);
+                    }
+                    btn.on_hover_ui(|ui| {
+                        ui.label(sn.blurb);
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(sn.code).monospace().small().weak());
+                    });
+                }
             }
         });
     }
@@ -455,6 +533,61 @@ impl WireLabApp {
         self.flow_code_open = open;
     }
 
+    /// VSCode-style one-liner: board · link · script state · problems · caret.
+    fn ide_status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let live = self.live.connected();
+            let (dot, color) = if live {
+                ("●", Color32::from_rgb(90, 220, 120))
+            } else {
+                ("○", Color32::from_gray(120))
+            };
+            ui.label(RichText::new(dot).color(color).small());
+            ui.label(
+                RichText::new(format!(
+                    "{} · {}",
+                    self.project.active_name(),
+                    self.project.circuit.board_id
+                ))
+                .small(),
+            );
+            if live {
+                let backend = match self.live.backend {
+                    crate::live::Backend::Simulator => "sim",
+                    crate::live::Backend::Serial => "usb",
+                    crate::live::Backend::Tcp => "wi-fi",
+                };
+                ui.label(RichText::new(backend).small().weak());
+            }
+            ui.separator();
+            let problems = self.script_ed.lint.len() + self.flow_cache.2.len();
+            if problems > 0 {
+                ui.label(
+                    RichText::new(format!("✖ {problems}"))
+                        .small()
+                        .color(ui.visuals().error_fg_color),
+                );
+            } else {
+                ui.label(RichText::new("✔").small().color(Color32::from_rgb(90, 220, 120)));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.active_comp().is_some() {
+                    let (l, c) = self.ide.cursor;
+                    ui.label(RichText::new(format!("Ln {l}, Col {c}")).small().weak());
+                    let hints = if self.ide.hints_on { "hints: on" } else { "hints: off" };
+                    if ui
+                        .add(egui::Button::new(RichText::new(hints).small()).frame(false))
+                        .on_hover_text("inline type hints")
+                        .clicked()
+                    {
+                        self.ide.hints_on = !self.ide.hints_on;
+                    }
+                }
+                ui.label(RichText::new("Rhai").small().weak());
+            });
+        });
+    }
+
     // --------------------------------------------------------- central --
 
     fn ide_central(&mut self, ui: &mut egui::Ui) {
@@ -462,6 +595,11 @@ impl WireLabApp {
             Some(IdeTab::Flow) => {
                 self.show_flow_editor(ui);
                 self.show_flow_code_window(ui.ctx());
+            }
+            Some(IdeTab::Program) => {
+                ScrollArea::vertical().id_salt("ide-program").show(ui, |ui| {
+                    self.show_program(ui);
+                });
             }
             Some(IdeTab::Info(key)) => {
                 ScrollArea::vertical().id_salt("ide-info").show(ui, |ui| {
@@ -510,6 +648,18 @@ impl WireLabApp {
 
     /// The text editor itself — the only thing that scrolls.
     fn ide_editor_text(&mut self, ui: &mut egui::Ui, _id: CompId, panel_height: f32) {
+        // A snippet click appends its template and jumps to it.
+        if let Some(code) = self.ide.pending_snippet.take() {
+            if !self.script_ed.buffer.is_empty() {
+                while !self.script_ed.buffer.ends_with("\n\n") {
+                    self.script_ed.buffer.push('\n');
+                }
+            }
+            let line = self.script_ed.buffer.lines().count();
+            self.script_ed.buffer.push_str(code);
+            self.ide.pending_jump = Some(line);
+        }
+
         let names = wirelab_core::script::component_names(&self.project.circuit, &self.lib);
 
         // Live lint on change.
@@ -614,6 +764,50 @@ impl WireLabApp {
             .desired_rows(rows)
             .layouter(&mut layouter)
             .show(ui);
+
+        // Caret position for the status bar.
+        if let Some(cr) = out.cursor_range {
+            let ci = cr.primary.index.0;
+            let (mut l, mut c) = (1usize, 1usize);
+            for (n, ch) in self.script_ed.buffer.chars().enumerate() {
+                if n >= ci {
+                    break;
+                }
+                if ch == '\n' {
+                    l += 1;
+                    c = 1;
+                } else {
+                    c += 1;
+                }
+            }
+            self.ide.cursor = (l, c);
+        }
+
+        // Inline type hints, painted as ghost text past each line's end.
+        if self.ide.hints_on {
+            let painter = ui.painter().with_clip_rect(out.text_clip_rect);
+            let font = egui::FontId::monospace(
+                ui.text_style_height(&egui::TextStyle::Monospace) * 0.75,
+            );
+            let color = ui.visuals().weak_text_color().gamma_multiply(0.75);
+            let lines: Vec<&str> = self.script_ed.buffer.lines().collect();
+            let mut line = 0usize;
+            let rows = &out.galley.rows;
+            for (ri, placed) in rows.iter().enumerate() {
+                let line_ends_here = placed.ends_with_newline || ri + 1 == rows.len();
+                if line_ends_here {
+                    if let Some(text) = lines.get(line)
+                        && let Some(hint) = line_hint(text)
+                    {
+                        let pos = out.galley_pos
+                            + placed.pos.to_vec2()
+                            + egui::vec2(placed.row.size.x + 14.0, 1.0);
+                        painter.text(pos, egui::Align2::LEFT_TOP, hint, font.clone(), color);
+                    }
+                    line += 1;
+                }
+            }
+        }
 
         // Requests from the side panels.
         let pending_jump = self.ide.pending_jump.take();
@@ -726,5 +920,107 @@ impl WireLabApp {
         }
 
         self.script_completion_and_hover(ui, &names, editor_id, accept, out);
+    }
+}
+
+/// Ghost-text hint for one source line: callback parameter types on `fn`
+/// lines, inferred value types on `let` bindings.
+fn line_hint(line: &str) -> Option<String> {
+    let t = line.trim();
+    const CALLBACKS: &[(&str, &str)] = &[
+        ("fn on_change(", "on: bool"),
+        ("fn on_reading(", "mv: int (millivolts)"),
+        ("fn on_tick(", "dt: int (ms)"),
+        ("fn on_pin(", "gpio: int, high: bool"),
+        ("fn on_uart(", "line: string"),
+        ("fn on_board_msg(", "from: string, text: string"),
+        ("fn on_i2c(", "addr: int, data: [int]"),
+        ("fn on_spi(", "data: [int]"),
+    ];
+    for (prefix, hint) in CALLBACKS {
+        if t.starts_with(prefix) {
+            return Some(hint.to_string());
+        }
+    }
+    let rest = t.strip_prefix("let ").or_else(|| t.strip_prefix("const "))?;
+    let (_, expr) = rest.split_once('=')?;
+    infer_type(expr).map(|ty| format!(": {ty}"))
+}
+
+/// Cheap, literal-and-known-call type inference; None when unsure.
+fn infer_type(expr: &str) -> Option<&'static str> {
+    let e = expr.trim().trim_end_matches(';').trim();
+    if e.is_empty() {
+        return None;
+    }
+    const CALLS: &[(&str, &'static str)] = &[
+        ("pin(", "Pin"),
+        ("comp(", "Component"),
+        ("millis()", "int (ms)"),
+        ("chip()", "string"),
+        ("board_has(", "bool"),
+    ];
+    for (call, ty) in CALLS {
+        if e.starts_with(call) && !e.contains('.') {
+            return Some(ty);
+        }
+    }
+    if e.ends_with(".millivolts()") {
+        return Some("int (mV)");
+    }
+    if e.ends_with(".is_on()") || e.ends_with(".is_pressed()") || e.ends_with(".is_high()") {
+        return Some("bool");
+    }
+    if e.starts_with('"') || e.starts_with('`') {
+        return Some("string");
+    }
+    if e == "true" || e == "false" || e.starts_with('!') {
+        return Some("bool");
+    }
+    if e.starts_with('[') {
+        return Some("array");
+    }
+    if e.starts_with("#{") {
+        return Some("map");
+    }
+    if e.starts_with("||") || (e.starts_with('|') && e.contains("| ")) {
+        return Some("closure");
+    }
+    // Numeric literals, incl. simple arithmetic over them.
+    let numeric = e
+        .chars()
+        .all(|c| c.is_ascii_digit() || " .+-*/%()_".contains(c));
+    if numeric && e.chars().any(|c| c.is_ascii_digit()) {
+        return Some(if e.contains('.') { "float" } else { "int" });
+    }
+    None
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    #[test]
+    fn infers_literals_calls_and_callbacks() {
+        assert_eq!(line_hint("let x = 42;").as_deref(), Some(": int"));
+        assert_eq!(line_hint("let y = 1.5;").as_deref(), Some(": float"));
+        assert_eq!(line_hint("let s = \"hi\";").as_deref(), Some(": string"));
+        assert_eq!(line_hint("let t = `n=${n}`;").as_deref(), Some(": string"));
+        assert_eq!(line_hint("let ok = !btn.is_on();").as_deref(), Some(": bool"));
+        assert_eq!(line_hint("let p = pin(4);").as_deref(), Some(": Pin"));
+        assert_eq!(line_hint("let mv = pot.millivolts();").as_deref(), Some(": int (mV)"));
+        assert_eq!(line_hint("let a = [1, 2];").as_deref(), Some(": array"));
+        assert_eq!(line_hint("let m = #{ a: 1 };").as_deref(), Some(": map"));
+        assert_eq!(line_hint("let t = millis() + 500;").as_deref(), Some(": int (ms)"));
+        assert_eq!(
+            line_hint("fn on_reading(mv) {").as_deref(),
+            Some("mv: int (millivolts)")
+        );
+        assert_eq!(
+            line_hint("fn on_board_msg(from, text) {").as_deref(),
+            Some("from: string, text: string")
+        );
+        assert_eq!(line_hint("red_led.toggle();"), None);
+        assert_eq!(line_hint("let z = mystery();"), None);
     }
 }

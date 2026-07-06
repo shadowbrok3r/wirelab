@@ -257,6 +257,34 @@ impl SnarlViewer<NodeKind> for FlowViewer {
             NodeKind::SendText { text } => {
                 ui.add(egui::TextEdit::singleline(text).desired_width(174.0));
             }
+            NodeKind::OnBoardMsg { from_board } => {
+                ui.add(
+                    egui::TextEdit::singleline(from_board)
+                        .hint_text("from board (blank = any)")
+                        .desired_width(174.0),
+                );
+            }
+            NodeKind::TextEquals { value } => {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("=").small());
+                    ui.add(egui::TextEdit::singleline(value).desired_width(150.0));
+                });
+            }
+            NodeKind::SendBoard { board, text } => {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("to").small());
+                    ui.add(
+                        egui::TextEdit::singleline(board)
+                            .hint_text("board name or *")
+                            .desired_width(140.0),
+                    );
+                });
+                ui.add(
+                    egui::TextEdit::singleline(text)
+                        .hint_text("message")
+                        .desired_width(174.0),
+                );
+            }
             NodeKind::LcdText { x, y } => {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("x").small());
@@ -369,6 +397,9 @@ fn generic_label(kind: &NodeKind) -> String {
         NodeKind::SetComp { .. } => "set component".into(),
         NodeKind::ToggleComp { .. } => "toggle component".into(),
         NodeKind::SendText { .. } => "send text".into(),
+        NodeKind::OnBoardMsg { .. } => "on board message".into(),
+        NodeKind::TextEquals { .. } => "text equals".into(),
+        NodeKind::SendBoard { .. } => "send to board".into(),
         NodeKind::Log { .. } => "log".into(),
         other => other.title(),
     }

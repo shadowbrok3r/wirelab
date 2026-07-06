@@ -58,7 +58,6 @@ pub struct ScriptEditor {
 }
 
 /// The script IDE: its own native window, VSCode-shaped.
-#[derive(Default)]
 pub struct IdeState {
     /// The IDE viewport is shown.
     pub open: bool,
@@ -73,6 +72,32 @@ pub struct IdeState {
     /// One-shot requests from side panels, consumed by the editor.
     pub pending_jump: Option<usize>,
     pub pending_find: Option<FindKind>,
+    /// Inline type hints in the editor.
+    pub hints_on: bool,
+    /// Caret (line, col), 1-based, for the status bar.
+    pub cursor: (usize, usize),
+    /// One-shot snippet insertion, consumed by the editor.
+    pub pending_snippet: Option<&'static str>,
+}
+
+impl Default for IdeState {
+    fn default() -> Self {
+        IdeState {
+            open: false,
+            tabs: Vec::new(),
+            active: 0,
+            find_open: false,
+            find: String::new(),
+            replace: String::new(),
+            bottom_open: false,
+            bottom_tab: IdeBottomTab::default(),
+            pending_jump: None,
+            pending_find: None,
+            hints_on: true,
+            cursor: (1, 1),
+            pending_snippet: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -97,6 +122,8 @@ pub enum IdeTab {
     Info(&'static str),
     /// The node-graph editor.
     Flow,
+    /// The rules program (triggers -> actions).
+    Program,
 }
 
 /// An open completion popup in the script editor.
@@ -354,6 +381,16 @@ impl WireLabApp {
         }
     }
 
+    pub fn open_program_tab(&mut self) {
+        self.ide.open = true;
+        if let Some(i) = self.ide.tabs.iter().position(|t| *t == IdeTab::Program) {
+            self.ide.active = i;
+        } else {
+            self.ide.tabs.push(IdeTab::Program);
+            self.ide.active = self.ide.tabs.len() - 1;
+        }
+    }
+
     /// Recompile the active flow graph when its revision moved.
     fn ensure_flow_cache(&mut self) {
         if self.flow_cache.0 != self.flow_rev {
@@ -462,7 +499,7 @@ impl WireLabApp {
 
     /// Switch to board tab `i`: park the current session (it keeps running),
     /// restore the target's, and reload everything derived.
-    fn switch_board(&mut self, i: usize) {
+    pub(crate) fn switch_board(&mut self, i: usize) {
         if i == self.project.active {
             return;
         }
@@ -472,6 +509,12 @@ impl WireLabApp {
         self.live = self.background.remove(&id).map(|b| b.live).unwrap_or_default();
         self.selection = Selection::None;
         self.script_ed = crate::app::ScriptEditor::default();
+        // Component tabs belong to the previous board's circuit.
+        self.ide.tabs.retain(|t| match t {
+            IdeTab::Comp(c) => self.project.circuit.components.contains_key(c),
+            _ => true,
+        });
+        self.ide.active = self.ide.active.min(self.ide.tabs.len().saturating_sub(1));
         self.topo_rev += 1;
         self.state_rev += 1;
         self.script_rev += 1;
@@ -875,12 +918,31 @@ impl eframe::App for WireLabApp {
             mail.extend(bb.live.outbox.drain(..).map(|(to, text)| (from.clone(), to, text)));
         }
         for (from, to, text) in mail {
+            let mut log = Vec::new();
+            // "*" broadcasts to every other live board.
+            if to.trim() == "*" {
+                if !self.project.active_name().eq_ignore_ascii_case(&from) {
+                    self.live.deliver_board_msg(&from, &text, &mut log);
+                }
+                for (id, bb) in self.background.iter_mut() {
+                    let sender = self
+                        .project
+                        .boards
+                        .iter()
+                        .find(|b| b.id == *id)
+                        .is_some_and(|b| b.name.eq_ignore_ascii_case(&from));
+                    if !sender {
+                        bb.live.deliver_board_msg(&from, &text, &mut log);
+                    }
+                }
+                self.console.extend(log);
+                continue;
+            }
             let target = self
                 .project
                 .boards
                 .iter()
                 .position(|b| b.name.eq_ignore_ascii_case(to.trim()));
-            let mut log = Vec::new();
             match target {
                 Some(i) if i == self.project.active => {
                     self.live.deliver_board_msg(&from, &text, &mut log);

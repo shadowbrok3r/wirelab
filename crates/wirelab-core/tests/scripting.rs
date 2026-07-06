@@ -819,3 +819,71 @@ fn board_messaging_emits_and_receives() {
     let logs = host.take_logs();
     assert!(logs.iter().any(|l| l.contains("house says hello")), "{logs:?}");
 }
+
+#[test]
+fn flow_board_msg_gate_pattern_toggles_on_matching_text() {
+    let lib = mini_lib();
+    let (mut circuit, led, _btn) = btn_led_circuit(&lib);
+    // board msg → gate(pulse), text → "= open" → gate enable; gate → toggle led.
+    let graph = FlowGraph {
+        nodes: vec![
+            fnode(NodeKind::OnBoardMsg { from_board: String::new() }),
+            fnode(NodeKind::TextEquals { value: "open".into() }),
+            fnode(NodeKind::Gate),
+            fnode(NodeKind::ToggleComp { comp: "led".into() }),
+        ],
+        wires: vec![
+            FlowWire { from: (0, 0), to: (2, 0) }, // recv pulse → gate in
+            FlowWire { from: (0, 1), to: (1, 0) }, // text → equals
+            FlowWire { from: (1, 0), to: (2, 1) }, // equals → gate enable
+            FlowWire { from: (2, 0), to: (3, 0) }, // gate → toggle
+        ],
+    };
+    let mut host = flow_host(&mut circuit, &lib, &graph);
+    let toggles = |a: &[Action]| {
+        a.iter().any(|x| matches!(
+            x,
+            Action::CompAction { comp, action, .. } if *comp == led && action == "toggle"
+        ))
+    };
+    // Wrong text: the gate stays shut.
+    let no = host.on_board_msg(FLOW_ID, "house", "close");
+    assert!(!toggles(&no), "{no:?}");
+    // Matching text toggles the LED.
+    let yes = host.on_board_msg(FLOW_ID, "house", "open");
+    assert!(toggles(&yes), "{yes:?}");
+}
+
+#[test]
+fn flow_board_msg_from_filter_and_send_board() {
+    let lib = mini_lib();
+    let (mut circuit, _led, btn) = btn_led_circuit(&lib);
+    let graph = FlowGraph {
+        nodes: vec![
+            fnode(NodeKind::OnBoardMsg { from_board: "garage".into() }),
+            fnode(NodeKind::Log { label: "gate".into() }),
+            fnode(NodeKind::OnPress { comp: "btn".into() }),
+            fnode(NodeKind::SendBoard { board: "garage".into(), text: "open".into() }),
+        ],
+        wires: vec![
+            FlowWire { from: (0, 0), to: (1, 0) },
+            FlowWire { from: (2, 0), to: (3, 0) },
+        ],
+    };
+    let mut host = flow_host(&mut circuit, &lib, &graph);
+    // The from-filter drops other senders…
+    host.on_board_msg(FLOW_ID, "porch", "x");
+    assert!(host.take_logs().is_empty());
+    // …and passes the named one.
+    host.on_board_msg(FLOW_ID, "garage", "x");
+    assert!(host.take_logs().iter().any(|l| l.contains("gate")));
+    // A press emits the routable BoardMsg action.
+    let actions = host.on_press(btn);
+    assert!(
+        actions.iter().any(|a| matches!(
+            a,
+            Action::BoardMsg { to, text } if to == "garage" && text == "open"
+        )),
+        "{actions:?}"
+    );
+}

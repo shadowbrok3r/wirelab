@@ -80,6 +80,10 @@ pub enum NodeKind {
     MapRange { in_min: f64, in_max: f64, out_min: f64, out_max: f64 },
     /// A Rhai expression over inputs `a`, `b`, `c`.
     Script { code: String, inputs: u8 },
+    /// A message from another board tab (send_board); `from_board` empty = any.
+    OnBoardMsg { from_board: String },
+    /// Text equality gate.
+    TextEquals { value: String },
     // ---- actions ----
     /// Level drives the component on/off.
     SetComp { comp: String },
@@ -93,6 +97,8 @@ pub enum NodeKind {
     UartSend,
     /// Pulse sends a fixed line on UART1.
     SendText { text: String },
+    /// Pulse sends `text` to another board tab ("*" = every live board).
+    SendBoard { board: String, text: String },
     LcdText { x: u8, y: u8 },
     Log { label: String },
 }
@@ -110,6 +116,7 @@ pub fn flow_categories() -> Vec<(&'static str, Vec<NodeKind>)> {
             NodeKind::OnUart,
             NodeKind::OnPin { gpio: 0 },
             NodeKind::Every { ms: 500.0 },
+            NodeKind::OnBoardMsg { from_board: String::new() },
             ],
         ),
         (
@@ -127,6 +134,7 @@ pub fn flow_categories() -> Vec<(&'static str, Vec<NodeKind>)> {
             NodeKind::Gate,
             NodeKind::MapRange { in_min: 0.0, in_max: 3100.0, out_min: 0.0, out_max: 1000.0 },
             NodeKind::Script { code: String::from("a"), inputs: 1 },
+            NodeKind::TextEquals { value: String::new() },
             ],
         ),
         (
@@ -140,6 +148,7 @@ pub fn flow_categories() -> Vec<(&'static str, Vec<NodeKind>)> {
             NodeKind::UartSend,
             NodeKind::SendText { text: String::from("hello\r\n") },
                 NodeKind::LcdText { x: 4, y: 4 },
+                NodeKind::SendBoard { board: String::new(), text: String::from("ping") },
                 NodeKind::Log { label: String::new() },
             ],
         ),
@@ -168,6 +177,14 @@ impl NodeKind {
             NodeKind::Gate => "gate".into(),
             NodeKind::MapRange { .. } => "map range".into(),
             NodeKind::Script { .. } => "script".into(),
+            NodeKind::OnBoardMsg { from_board } => {
+                if from_board.is_empty() {
+                    "board msg".into()
+                } else {
+                    format!("msg from {from_board}")
+                }
+            }
+            NodeKind::TextEquals { value } => format!("= \"{value}\""),
             NodeKind::SetComp { comp } => format!("set: {}", pick(comp)),
             NodeKind::ToggleComp { comp } => format!("toggle: {}", pick(comp)),
             NodeKind::SetPin { gpio } => format!("set GPIO{gpio}"),
@@ -175,6 +192,7 @@ impl NodeKind {
             NodeKind::Rgb => "rgb led".into(),
             NodeKind::UartSend => "uart send".into(),
             NodeKind::SendText { .. } => "send text".into(),
+            NodeKind::SendBoard { board, .. } => format!("→ board {}", pick(board)),
             NodeKind::LcdText { .. } => "lcd text".into(),
             NodeKind::Log { .. } => "log".into(),
         }
@@ -189,7 +207,8 @@ impl NodeKind {
             | NodeKind::OnReading { .. }
             | NodeKind::OnUart
             | NodeKind::OnPin { .. }
-            | NodeKind::Every { .. } => vec![],
+            | NodeKind::Every { .. }
+            | NodeKind::OnBoardMsg { .. } => vec![],
             NodeKind::Compare { .. } | NodeKind::Threshold { .. } | NodeKind::MapRange { .. } => {
                 vec![("in", Num)]
             }
@@ -198,6 +217,7 @@ impl NodeKind {
             NodeKind::Toggle | NodeKind::Counter { .. } | NodeKind::Delay { .. } => {
                 vec![("in", Pulse)]
             }
+            NodeKind::TextEquals { .. } => vec![("in", Text)],
             NodeKind::Gate => vec![("in", Pulse), ("enable", Bool)],
             NodeKind::Script { inputs, .. } => ["a", "b", "c"]
                 .iter()
@@ -205,7 +225,9 @@ impl NodeKind {
                 .map(|n| (*n, Any))
                 .collect(),
             NodeKind::SetComp { .. } | NodeKind::SetPin { .. } => vec![("on", Bool)],
-            NodeKind::ToggleComp { .. } | NodeKind::SendText { .. } => vec![("in", Pulse)],
+            NodeKind::ToggleComp { .. }
+            | NodeKind::SendText { .. }
+            | NodeKind::SendBoard { .. } => vec![("in", Pulse)],
             NodeKind::Pwm { .. } => vec![("duty", Num)],
             NodeKind::Rgb => vec![("r", Num), ("g", Num), ("b", Num)],
             NodeKind::UartSend | NodeKind::LcdText { .. } => vec![("text", Text)],
@@ -229,11 +251,15 @@ impl NodeKind {
             | NodeKind::Not
             | NodeKind::And
             | NodeKind::Or
-            | NodeKind::Toggle => vec![("out", Bool)],
+            | NodeKind::Toggle
+            | NodeKind::TextEquals { .. } => vec![("out", Bool)],
             NodeKind::OnReading { .. } | NodeKind::Counter { .. } | NodeKind::MapRange { .. } => {
                 vec![("out", Num)]
             }
             NodeKind::OnUart => vec![("line", Text)],
+            NodeKind::OnBoardMsg { .. } => {
+                vec![("recv", Pulse), ("text", Text), ("from", Text)]
+            }
             NodeKind::Script { .. } => vec![("out", Any)],
             _ => vec![],
         }
@@ -329,6 +355,12 @@ pub fn compile(graph: &FlowGraph) -> Result<String, Vec<FlowError>> {
                 msg: format!("'{}' needs a component picked", n.kind.title()),
             });
         }
+        if matches!(&n.kind, NodeKind::SendBoard { board, .. } if board.is_empty()) {
+            errors.push(FlowError {
+                node: Some(i),
+                msg: "'send to board' needs a target board name (or \"*\")".into(),
+            });
+        }
     }
 
     let mut input_wire = std::collections::HashMap::new();
@@ -408,6 +440,7 @@ pub fn compile(graph: &FlowGraph) -> Result<String, Vec<FlowError>> {
     emit_on_reading(&mut out, &ctx);
     emit_on_uart(&mut out, &ctx);
     emit_on_pin(&mut out, &ctx);
+    emit_on_board_msg(&mut out, &ctx);
     emit_on_tick(&mut out, &ctx);
 
     Ok(out)
@@ -521,6 +554,10 @@ fn emit_node(
             let e = ctx.input_expr(k, 0);
             let _ = writeln!(out, "{pad}this.n{k}_0 = !{e};");
         }
+        NodeKind::TextEquals { value } => {
+            let e = ctx.input_expr(k, 0);
+            let _ = writeln!(out, "{pad}this.n{k}_0 = {e} == \"{}\";", esc(value));
+        }
         NodeKind::And => {
             let (a, b) = (ctx.input_expr(k, 0), ctx.input_expr(k, 1));
             let _ = writeln!(out, "{pad}this.n{k}_0 = {a} && {b};");
@@ -605,6 +642,15 @@ fn emit_node(
         NodeKind::SendText { text } => {
             let p = pulse_in(ctx, live, k, 0);
             let _ = writeln!(out, "{pad}if {p} {{ uart_send(\"{}\"); }}", esc(text));
+        }
+        NodeKind::SendBoard { board, text } => {
+            let p = pulse_in(ctx, live, k, 0);
+            let _ = writeln!(
+                out,
+                "{pad}if {p} {{ send_board(\"{}\", \"{}\"); }}",
+                esc(board),
+                esc(text)
+            );
         }
         NodeKind::LcdText { x, y } => {
             let e = ctx.input_expr(k, 0);
@@ -748,6 +794,38 @@ fn emit_on_pin(out: &mut String, ctx: &Ctx) {
         let _ = writeln!(out, "        this.n{i}_0 = high;");
         emit_downstream(out, ctx, i, "false", 8);
         let _ = writeln!(out, "    }}");
+    }
+    let _ = writeln!(out, "}}\n");
+}
+
+fn emit_on_board_msg(out: &mut String, ctx: &Ctx) {
+    let sources: Vec<(usize, String)> = ctx
+        .graph
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, n)| match &n.kind {
+            NodeKind::OnBoardMsg { from_board } => Some((i, from_board.clone())),
+            _ => None,
+        })
+        .collect();
+    if sources.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "fn on_board_msg(from, text) {{");
+    for (i, filter) in sources {
+        let (pad, close) = if filter.is_empty() {
+            ("    ", None)
+        } else {
+            let _ = writeln!(out, "    if from == \"{}\" {{", esc(&filter));
+            ("        ", Some("    }"))
+        };
+        let _ = writeln!(out, "{pad}this.n{i}_1 = text;");
+        let _ = writeln!(out, "{pad}this.n{i}_2 = from;");
+        emit_downstream(out, ctx, i, "true", pad.len());
+        if let Some(c) = close {
+            let _ = writeln!(out, "{c}");
+        }
     }
     let _ = writeln!(out, "}}\n");
 }

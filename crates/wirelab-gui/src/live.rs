@@ -600,3 +600,71 @@ impl LiveState {
         self.session.as_ref().map(|s| s.effective_bank())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wirelab_core::circuit::{CompId, PlacedComponent};
+    use wirelab_core::component::{CompState, SimModel};
+
+    fn test_lib() -> Library {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        Library::load(&assets.join("boards"), &assets.join("components")).expect("assets")
+    }
+
+    fn circuit_with_button_script(script: &str) -> Circuit {
+        let mut c = Circuit::new("esp32-c5-devkitc-1");
+        c.add_component(PlacedComponent {
+            id: CompId(0),
+            def_id: "push-button".into(),
+            pos: [0.0, 0.0],
+            rotation: 0,
+            label: "btn".into(),
+            props: Default::default(),
+            state: CompState::initial(&SimModel::PushButton),
+            script: Some(script.into()),
+        });
+        c
+    }
+
+    /// Bring a sim session up and run its scripts' on_start.
+    fn live_for(lib: &Library, circuit: &Circuit) -> (LiveState, Netlist, Bindings) {
+        let board = lib.board(&circuit.board_id).expect("board").clone();
+        let netlist = Netlist::build(circuit, &board, lib);
+        let (_msgs, bindings) = plan_setup(circuit, &board, lib, &netlist);
+        let mut live = LiveState::default();
+        let mut log = Vec::new();
+        live.connect_sim(lib, circuit, &mut log);
+        for _ in 0..5 {
+            live.tick(lib, circuit, &netlist, &bindings, 1, 1, 1, 1, None, &mut log);
+        }
+        (live, netlist, bindings)
+    }
+
+    /// The exact mechanics the app's router relies on: a script's send_board
+    /// lands in the outbox during tick, and deliver_board_msg dispatches
+    /// on_board_msg on the receiving board's scripts.
+    #[test]
+    fn send_board_routes_between_two_live_sims() {
+        let lib = test_lib();
+        let ca = circuit_with_button_script(r#"fn on_start() { send_board("b", "ping"); }"#);
+        let cb = circuit_with_button_script(
+            r#"fn on_board_msg(from, text) { log(`${from} -> ${text}`); }"#,
+        );
+        let (mut la, _nla, _ba) = live_for(&lib, &ca);
+        let (mut lb, _nlb, _bb) = live_for(&lib, &cb);
+        assert!(la.connected() && lb.connected());
+
+        // A's on_start queued the message for the router, not the device.
+        let mail: Vec<_> = la.outbox.drain(..).collect();
+        assert_eq!(mail, vec![("b".to_string(), "ping".to_string())]);
+
+        // Deliver to B exactly like the app does; its handler logs.
+        let mut log = Vec::new();
+        lb.deliver_board_msg("a", "ping", &mut log);
+        assert!(
+            log.iter().any(|l| l.contains("a -> ping")),
+            "receiver handler ran: {log:?}"
+        );
+    }
+}

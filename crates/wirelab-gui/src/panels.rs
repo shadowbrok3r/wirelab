@@ -146,9 +146,13 @@ impl WireLabApp {
             ui.add_space(4.0);
             self.show_inspector(ui);
             ui.add_space(4.0);
-            egui::CollapsingHeader::new(RichText::new("⚙ Program").strong())
-                .default_open(true)
-                .show(ui, |ui| self.show_program(ui));
+            if ui
+                .button("⚙ Rules & scripts moved to the IDE →")
+                .on_hover_text("Tools → Open IDE, or click here")
+                .clicked()
+            {
+                self.open_program_tab();
+            }
         });
     }
 
@@ -1064,7 +1068,7 @@ impl WireLabApp {
             .collect()
     }
 
-    fn show_program(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn show_program(&mut self, ui: &mut egui::Ui) {
         let event_comps = self.event_comps();
         let action_comps = self.action_comps();
         let now = self.live.now_ms();

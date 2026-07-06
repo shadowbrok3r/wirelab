@@ -1,0 +1,34 @@
+{
+  "id": "resistor-22k",
+  "name": "22 kOhm Resistor",
+  "category": "Passive",
+  "description": "22 kohm 1/4W resistor. Weak pull or upper half of a divider reading higher-voltage signals. Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 22000.0
+  },
+  "actions": [],
+  "events": []
+}

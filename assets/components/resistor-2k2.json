@@ -1,0 +1,34 @@
+{
+  "id": "resistor-2k2",
+  "name": "2.2 kOhm Resistor",
+  "category": "Passive",
+  "description": "2.2 kohm 1/4W resistor. General-purpose value: transistor base drive, LED at low brightness, dividers. Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 2200.0
+  },
+  "actions": [],
+  "events": []
+}

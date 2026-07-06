@@ -1,0 +1,595 @@
+{
+ "name": "Security panel \u2014 full state machine (every subsystem)",
+ "circuit": {
+  "board_id": "esp32-c5-devkitc-1",
+  "board_pos": [
+   0.0,
+   0.0
+  ],
+  "components": {
+   "1": {
+    "id": 1,
+    "def_id": "push-button",
+    "pos": [
+     40.0,
+     40.0
+    ],
+    "rotation": 0,
+    "label": "keypad",
+    "props": {},
+    "state": {
+     "kind": "button",
+     "pressed": false
+    },
+    "script": "// \u2500\u2500 WireLab Security Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n// A full six-state alarm system living entirely in one script. This is the\n// \"everything\" demo: it drives the on-board RGB LED, an ST7735 LCD over SPI,\n// a PWM siren, an ADC tamper sensor, PIR + reed zones (raw pin edges), an\n// RDM6300 keycard reader + remote text commands over UART1, and an I2C\n// ambient sensor \u2014 coordinated by a state machine on `this`.\n//\n// States:  disarmed \u2192 arming \u2192 armed \u2192 entry \u2192 alarm \u2192 (lockout) \u2192 disarmed\n// Attach point: the keypad button. Zones/UART/I2C broadcast to every script,\n// so this one brain sees them all.\n\n// ---- pure helpers (no `this`; they take what they need as arguments) ----\n\nfn big_label(s) {\n    if s == \"disarmed\" { \"DISARMED\" }\n    else if s == \"arming\" { \"ARMING\" }\n    else if s == \"armed\" { \"ARMED\" }\n    else if s == \"entry\" { \"ENTER CODE\" }\n    else if s == \"alarm\" { \"!! ALARM !!\" }\n    else { \"LOCKED OUT\" }\n}\n\nfn state_bg(s) {\n    if s == \"disarmed\" { [0, 40, 0] }\n    else if s == \"arming\" { [55, 40, 0] }\n    else if s == \"armed\" { [0, 0, 55] }\n    else if s == \"entry\" { [65, 30, 0] }\n    else if s == \"alarm\" { [95, 0, 0] }\n    else { [35, 0, 0] }\n}\n\n// Triangle wave 0..80 with the given period, for smooth LED pulsing.\nfn pulse(t, period) {\n    let x = t % period;\n    let half = period / 2;\n    if x < half { x * 80 / half } else { (period - x) * 80 / half }\n}\n\n// Map the current state to an on-board RGB animation.\nfn status_led(s, t) {\n    if s == \"disarmed\" { rgb(0, 55, 0); }\n    else if s == \"arming\" { let p = pulse(t, 500); rgb(p * 3 / 2, p, 0); }\n    else if s == \"armed\" { let p = pulse(t, 1800); rgb(0, 0, p + 6); }\n    else if s == \"entry\" { let p = pulse(t, 240); rgb(p * 3 / 2, p / 2, 0); }\n    else if s == \"alarm\" { if (t / 110) % 2 == 0 { rgb(200, 0, 0); } else { rgb(0, 0, 0); } }\n    else { rgb(30, 0, 0); }\n}\n\n// Wailing siren on GPIO25: sweep 600\u21921600 Hz each second, or silence.\nfn siren(on, t) {\n    if on { pin(25).pwm(600 + (t % 1000), 500); } else { pin(25).low(); }\n}\n\n// A short confirmation (ok) or reject (err) beep that auto-silences via after().\nfn confirm(kind) {\n    if kind == \"ok\" { pin(25).pwm(2200, 500); after(90, || pin(25).low()); }\n    else { pin(25).pwm(320, 500); after(260, || pin(25).low()); }\n}\n\n// Repaint the whole panel: title bar, big state, sub-line, temp + light.\nfn paint(s, sub, temp_c, light) {\n    let bg = state_bg(s);\n    lcd_clear(bg[0], bg[1], bg[2]);\n    lcd_rect(0, 0, 128, 15, 18, 18, 28);\n    lcd_text(6, 3, \"WIRELAB SECURITY\", 200, 205, 225);\n    lcd_text(6, 34, big_label(s), 255, 255, 255);\n    lcd_text(6, 58, sub, 215, 215, 220);\n    lcd_text(6, 96, `TEMP ${temp_c}C`, 150, 220, 255);\n    lcd_text(6, 112, `LIGHT ${light}`, 255, 220, 140);\n}\n\n// ---- lifecycle ----\n\nfn on_start() {\n    this.state = \"disarmed\";\n    this.deadline = 0;      // millis() at which a timed state expires (0 = none)\n    this.digits = 0;        // disarm-code digits entered\n    this.fails = 0;         // failed disarm cycles (3 \u2192 lockout)\n    this.temp_c = 0;        // last I2C ambient reading\n    this.light_base = 0;    // tamper baseline captured while armed\n    this.last_lcd = 0;\n    this.last_i2c = 0;\n    this.evt = \"ready\";     // sub-line shown on the LCD\n    this.press_at = 0;      // for short/long press detection\n    this.card = \"0000ABCD\"; // authorized keycard id\n\n    lcd_init(6, 7, 8, 9, 23);   // ST7735 on SPI2: sck, mosi, cs, dc, rst\n    uart(26, 24, 9600);         // RDM6300 keycard reader \u2192 RX 24\n    i2c_setup(0, 1, 100);       // ambient sensor bus (SDA 0, SCL 1)\n    pin(3).watch_analog(200);   // tamper LDR on ADC\n    pin(25).low();              // siren off\n    rgb(0, 55, 0);\n\n    log(`WireLab security panel online on ${chip()}`);\n    if board_has(\"wifi\") { log(\"Wi-Fi present \u2014 remote arm/disarm over the link\"); }\n    paint(\"disarmed\", \"ready\", 0, 0);\n}\n\n// ---- inputs ----\n\nfn on_press() {\n    this.press_at = millis();\n}\n\nfn on_release() {\n    let held = millis() - this.press_at;\n\n    // A long hold is a panic button from any state.\n    if held > 1000 {\n        this.state = \"alarm\";\n        this.deadline = millis() + 20000;\n        this.evt = \"PANIC\";\n        confirm(\"err\");\n        log(\"PANIC\");\n        return;\n    }\n\n    let s = this.state;\n    if s == \"disarmed\" {\n        this.state = \"arming\";\n        this.deadline = millis() + 15000;   // 15 s exit delay\n        this.evt = \"leave now\";\n        confirm(\"ok\");\n        log(\"arming\");\n    } else if s == \"arming\" {\n        this.state = \"disarmed\";\n        this.deadline = 0;\n        this.evt = \"cancelled\";\n        confirm(\"ok\");\n        log(\"disarmed\");\n    } else if s == \"entry\" || s == \"alarm\" {\n        // Punch in the disarm code: four quick presses.\n        this.digits = this.digits + 1;\n        this.evt = `code ${this.digits}/4`;\n        confirm(\"ok\");\n        if this.digits >= 4 {\n            this.state = \"disarmed\";\n            this.deadline = 0;\n            this.digits = 0;\n            this.fails = 0;\n            this.evt = \"welcome home\";\n            log(\"disarmed by code\");\n        }\n    }\n}\n\n// Raw pin edges from the zones (PIR on GPIO5, reed door on GPIO10).\nfn on_pin(gpio, high) {\n    if !high || this.state != \"armed\" { return; }\n    if gpio == 5 {\n        this.state = \"entry\";               // motion: grace period to disarm\n        this.deadline = millis() + 10000;\n        this.digits = 0;\n        this.evt = \"motion zone 1\";\n        log(\"entry delay\");\n    } else if gpio == 10 {\n        this.state = \"alarm\";               // door forced: instant\n        this.deadline = millis() + 20000;\n        this.evt = \"DOOR forced\";\n        log(\"alarm: door\");\n    }\n}\n\n// UART1 carries both keycard ids (from the RDM6300) and remote text commands.\nfn on_uart(line) {\n    if line == this.card {\n        if this.state != \"disarmed\" {\n            this.state = \"disarmed\";\n            this.deadline = 0;\n            this.digits = 0;\n            this.fails = 0;\n            this.evt = \"card accepted\";\n            confirm(\"ok\");\n            log(\"disarmed by keycard\");\n        }\n    } else if line == \"arm\" && this.state == \"disarmed\" {\n        this.state = \"arming\";\n        this.deadline = millis() + 15000;\n        this.evt = \"remote arm\";\n        confirm(\"ok\");\n        log(\"remote arm\");\n    } else if line == \"disarm\" {\n        this.state = \"disarmed\";\n        this.deadline = 0;\n        this.digits = 0;\n        this.fails = 0;\n        this.evt = \"remote disarm\";\n        confirm(\"ok\");\n        log(\"remote disarm\");\n    } else if line == \"status\" {\n        uart_send(`STATE ${this.state} TEMP ${this.temp_c}\\r\\n`);\n    } else if this.state == \"entry\" || this.state == \"alarm\" {\n        this.evt = \"bad card\";\n        confirm(\"err\");\n    }\n}\n\n// I2C ambient sensor reply (a BME280-style read triggered from on_tick).\nfn on_i2c(addr, data) {\n    if data.len() > 0 { this.temp_c = data[0]; }\n}\n\n// The clock: animations, sensor polling, timed transitions, LCD refresh.\nfn on_tick(dt) {\n    let now = millis();\n    let s = this.state;\n\n    status_led(s, now);\n    siren(s == \"alarm\", now);\n\n    // Poll the ambient sensor every 2 s; the reply lands in on_i2c.\n    if now - this.last_i2c > 2000 {\n        this.last_i2c = now;\n        i2c_read(0x76, 0xE3, 2);\n    }\n\n    // Tamper: a big swing in the panel light sensor while armed = intrusion.\n    if s == \"armed\" {\n        let light = pin(3).millivolts();\n        if this.light_base == 0 { this.light_base = light + 1; }\n        let d = light - this.light_base + 1;\n        if d < 0 { d = -d; }\n        if d > 800 {\n            this.state = \"alarm\";\n            this.deadline = now + 20000;\n            this.evt = \"TAMPER\";\n            log(\"alarm: tamper\");\n        }\n    } else {\n        this.light_base = 0;\n    }\n\n    // Timed transitions.\n    if this.deadline != 0 && now >= this.deadline {\n        if s == \"arming\" {\n            this.state = \"armed\";\n            this.deadline = 0;\n            this.light_base = 0;\n            this.evt = \"all zones set\";\n            log(\"armed\");\n        } else if s == \"entry\" {\n            this.state = \"alarm\";\n            this.deadline = now + 20000;\n            this.evt = \"no code\";\n            log(\"alarm: entry timeout\");\n        } else if s == \"alarm\" {\n            this.fails = this.fails + 1;\n            if this.fails >= 3 {\n                this.state = \"lockout\";\n                this.deadline = now + 30000;\n                this.evt = \"too many trips\";\n                log(\"lockout\");\n            } else {\n                this.state = \"armed\";\n                this.deadline = 0;\n                this.evt = \"re-armed\";\n                log(\"re-armed\");\n            }\n        } else if s == \"lockout\" {\n            this.state = \"disarmed\";\n            this.deadline = 0;\n            this.fails = 0;\n            this.evt = \"ready\";\n            log(\"lockout cleared\");\n        }\n    }\n\n    // Repaint ~2x/sec with a live countdown.\n    if now - this.last_lcd > 500 {\n        this.last_lcd = now;\n        let sub = this.evt;\n        if this.deadline != 0 {\n            let secs = (this.deadline - now) / 1000;\n            if secs < 0 { secs = 0; }\n            sub = `${this.evt} ${secs}s`;\n        }\n        paint(this.state, sub, this.temp_c, pin(3).millivolts());\n    }\n}\n"
+   },
+   "2": {
+    "id": 2,
+    "def_id": "pir-motion-sensor",
+    "pos": [
+     40.0,
+     120.0
+    ],
+    "rotation": 0,
+    "label": "zone_pir",
+    "props": {},
+    "state": {
+     "kind": "toggle",
+     "on": false
+    },
+    "script": null
+   },
+   "3": {
+    "id": 3,
+    "def_id": "reed-switch",
+    "pos": [
+     40.0,
+     190.0
+    ],
+    "rotation": 0,
+    "label": "zone_door",
+    "props": {},
+    "state": {
+     "kind": "button",
+     "pressed": false
+    },
+    "script": null
+   },
+   "4": {
+    "id": 4,
+    "def_id": "photoresistor-ldr",
+    "pos": [
+     40.0,
+     250.0
+    ],
+    "rotation": 0,
+    "label": "tamper",
+    "props": {},
+    "state": {
+     "kind": "fraction",
+     "value": 0.5
+    },
+    "script": null
+   },
+   "5": {
+    "id": 5,
+    "def_id": "resistor-10k",
+    "pos": [
+     110.0,
+     250.0
+    ],
+    "rotation": 0,
+    "label": "",
+    "props": {},
+    "state": {
+     "kind": "none"
+    },
+    "script": null
+   },
+   "6": {
+    "id": 6,
+    "def_id": "buzzer-passive",
+    "pos": [
+     200.0,
+     40.0
+    ],
+    "rotation": 0,
+    "label": "siren",
+    "props": {},
+    "state": {
+     "kind": "none"
+    },
+    "script": null
+   },
+   "7": {
+    "id": 7,
+    "def_id": "st7735-tft-128",
+    "pos": [
+     200.0,
+     130.0
+    ],
+    "rotation": 0,
+    "label": "screen",
+    "props": {},
+    "state": {
+     "kind": "none"
+    },
+    "script": null
+   },
+   "8": {
+    "id": 8,
+    "def_id": "rdm6300",
+    "pos": [
+     200.0,
+     250.0
+    ],
+    "rotation": 0,
+    "label": "reader",
+    "props": {},
+    "state": {
+     "kind": "toggle",
+     "on": false
+    },
+    "script": null
+   }
+  },
+  "wires": {
+   "1": {
+    "id": 1,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO4"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "a"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "2": {
+    "id": 2,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "3": {
+    "id": 3,
+    "a": {
+     "at": "board_pin",
+     "key": "5V"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "vcc"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "4": {
+    "id": 4,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "5": {
+    "id": 5,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "signal"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO5"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "6": {
+    "id": 6,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO10"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "a"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "7": {
+    "id": 7,
+    "a": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND2"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "8": {
+    "id": 8,
+    "a": {
+     "at": "board_pin",
+     "key": "3V3"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "a"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "9": {
+    "id": 9,
+    "a": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO3"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "10": {
+    "id": 10,
+    "a": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 5,
+     "terminal": "a"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "11": {
+    "id": 11,
+    "a": {
+     "at": "terminal",
+     "comp": 5,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND2"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "12": {
+    "id": 12,
+    "a": {
+     "at": "terminal",
+     "comp": 6,
+     "terminal": "signal"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO25"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "13": {
+    "id": 13,
+    "a": {
+     "at": "terminal",
+     "comp": 6,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND3"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "14": {
+    "id": 14,
+    "a": {
+     "at": "board_pin",
+     "key": "5V"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "vin"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "15": {
+    "id": 15,
+    "a": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND3"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "16": {
+    "id": 16,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO6"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "sck"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "17": {
+    "id": 17,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO7"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "mosi"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "18": {
+    "id": 18,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO8"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "tft_cs"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "19": {
+    "id": 19,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO9"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "dc"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "20": {
+    "id": 20,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO23"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "reset"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "21": {
+    "id": 21,
+    "a": {
+     "at": "board_pin",
+     "key": "5V"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 8,
+     "terminal": "vcc"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "22": {
+    "id": 22,
+    "a": {
+     "at": "terminal",
+     "comp": 8,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND4"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "23": {
+    "id": 23,
+    "a": {
+     "at": "terminal",
+     "comp": 8,
+     "terminal": "tx"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO24"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   }
+  },
+  "next_comp": 9,
+  "next_wire": 24
+ },
+ "program": {
+  "rules": []
+ },
+ "flow": {
+  "nodes": [
+   {
+    "kind": {
+     "t": "Every",
+     "ms": 30000.0
+    },
+    "pos": [
+     40.0,
+     40.0
+    ]
+   },
+   {
+    "kind": {
+     "t": "Log",
+     "label": "heartbeat: panel alive"
+    },
+    "pos": [
+     260.0,
+     40.0
+    ]
+   }
+  ],
+  "wires": [
+   {
+    "from": [
+     0,
+     0
+    ],
+    "to": [
+     1,
+     0
+    ]
+   }
+  ]
+ }
+}

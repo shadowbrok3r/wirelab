@@ -1,0 +1,50 @@
+{
+  "name": "Blink via rules (press Run)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {},
+    "wires": {},
+    "next_comp": 1,
+    "next_wire": 1
+  },
+  "program": {
+    "rules": [
+      {
+        "name": "setup",
+        "enabled": true,
+        "trigger": {
+          "kind": "on_start"
+        },
+        "actions": [
+          {
+            "kind": "set_pin_mode",
+            "gpio": 2,
+            "mode": "Output"
+          },
+          {
+            "kind": "log",
+            "text": "blinking GPIO2 - stop with the stop button"
+          }
+        ]
+      },
+      {
+        "name": "blink",
+        "enabled": true,
+        "trigger": {
+          "kind": "every",
+          "ms": 500
+        },
+        "actions": [
+          {
+            "kind": "toggle_pin",
+            "gpio": 2
+          }
+        ]
+      }
+    ]
+  }
+}

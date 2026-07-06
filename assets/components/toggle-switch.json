@@ -1,0 +1,23 @@
+{
+  "id": "toggle-switch",
+  "name": "Toggle Switch",
+  "category": "Input",
+  "description": "SPST latching toggle switch. Wire one lug to a GPIO and the other to GND; the pin uses an internal pull-up, so the GPIO reads low while the switch is on.",
+  "terminals": [
+    { "id": "a", "name": "Lug A", "role": "a" },
+    { "id": "b", "name": "Lug B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "toggle_switch",
+    "color": [95, 100, 110],
+    "width_mm": 8.0,
+    "height_mm": 13.0
+  },
+  "sim": { "kind": "toggle_switch" },
+  "actions": [],
+  "events": [
+    { "id": "on", "name": "Switched on" },
+    { "id": "off", "name": "Switched off" },
+    { "id": "changed", "name": "Changed" }
+  ]
+}

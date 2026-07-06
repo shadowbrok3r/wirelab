@@ -1,0 +1,24 @@
+{
+  "id": "pir-motion-sensor",
+  "name": "PIR Motion Sensor (HC-SR501)",
+  "category": "Input",
+  "description": "HC-SR501 passive infrared motion detector; OUT goes high while motion is detected. Wire VCC to 5V, GND to GND and OUT to a GPIO (the 3.3V output is safe to read directly).",
+  "terminals": [
+    { "id": "vcc", "name": "VCC", "role": "vcc" },
+    { "id": "gnd", "name": "GND", "role": "gnd" },
+    { "id": "signal", "name": "OUT", "role": "signal" }
+  ],
+  "visual": {
+    "shape": "sensor_module",
+    "color": [230, 228, 220],
+    "width_mm": 24.0,
+    "height_mm": 33.0
+  },
+  "sim": { "kind": "digital_sensor" },
+  "actions": [],
+  "events": [
+    { "id": "high", "name": "Motion detected" },
+    { "id": "low", "name": "Motion ended" },
+    { "id": "changed", "name": "Changed" }
+  ]
+}

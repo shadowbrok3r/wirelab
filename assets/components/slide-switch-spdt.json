@@ -1,0 +1,24 @@
+{
+  "id": "slide-switch-spdt",
+  "name": "Slide Switch (SPDT)",
+  "category": "Input",
+  "description": "SPDT slide switch that connects the centre pin to one of the two outer pins. Wire the common (centre) pin to a GPIO and one outer pin to GND; the pin uses an internal pull-up, or wire both outer pins to route the common between two nets.",
+  "terminals": [
+    { "id": "common", "name": "Common (centre)", "role": "common" },
+    { "id": "a", "name": "Throw A", "role": "a" },
+    { "id": "b", "name": "Throw B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "slide_switch",
+    "color": [190, 60, 55],
+    "width_mm": 12.0,
+    "height_mm": 5.0
+  },
+  "sim": { "kind": "slide_switch_spdt" },
+  "actions": [],
+  "events": [
+    { "id": "on", "name": "Slid to A" },
+    { "id": "off", "name": "Slid to B" },
+    { "id": "changed", "name": "Changed" }
+  ]
+}

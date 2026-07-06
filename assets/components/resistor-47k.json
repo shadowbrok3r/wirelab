@@ -1,0 +1,34 @@
+{
+  "id": "resistor-47k",
+  "name": "47 kOhm Resistor",
+  "category": "Passive",
+  "description": "47 kohm 1/4W resistor. Weak pull-up/pull-down; low-leakage biasing. Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 47000.0
+  },
+  "actions": [],
+  "events": []
+}

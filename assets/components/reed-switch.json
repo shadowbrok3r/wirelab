@@ -1,0 +1,23 @@
+{
+  "id": "reed-switch",
+  "name": "Reed Switch",
+  "category": "Input",
+  "description": "Magnetic reed contact in a glass tube: the contacts close when a magnet comes within a centimetre or two. Wire one lead to a GPIO and the other to GND; the pin uses an internal pull-up, so the GPIO reads low while the magnet is near.",
+  "terminals": [
+    { "id": "a", "name": "Lead A", "role": "a" },
+    { "id": "b", "name": "Lead B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "generic",
+    "color": [165, 200, 185],
+    "width_mm": 14.0,
+    "height_mm": 3.0
+  },
+  "sim": { "kind": "push_button" },
+  "actions": [],
+  "events": [
+    { "id": "pressed", "name": "Magnet near (closed)" },
+    { "id": "released", "name": "Magnet away (open)" },
+    { "id": "changed", "name": "Changed" }
+  ]
+}

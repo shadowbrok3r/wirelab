@@ -1,0 +1,47 @@
+{
+  "name": "LCD clock (ST7735 display)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "junction-dot",
+        "pos": [
+          70.0,
+          6.0
+        ],
+        "rotation": 0,
+        "label": "clock",
+        "props": {},
+        "state": {
+          "kind": "none"
+        },
+        "script": "// LCD clock + stats - drives the ST7735 display from a script.\n//\n// Wire the display to the C5 (3.3V logic):\n//   VIN->3V3  GND->GND  SCK->GPIO6  MOSI->GPIO7\n//   TFT_CS->GPIO8  D/C->GPIO9  RESET->GPIO10\n// The SIMULATOR renders the screen right on the component - no wiring\n// needed to develop; flash + wire to see it for real.\n\nfn on_start() {\n    lcd_init(6, 7, 8, 9, 10);        // sck, mosi, cs, dc, rst\n    lcd_clear(0, 0, 40);             // deep blue\n    lcd_text(10, 6, \"WIRELAB\", 255, 220, 80);\n    lcd_rect(6, 20, 116, 2, 255, 220, 80);\n    this.last = 0;\n    log(\"lcd running\");\n}\n\nfn on_tick(dt_ms) {\n    let t = millis() / 1000;\n    if t == this.last { return; }\n    this.last = t;\n    // Repaint just the changing region, not the whole screen.\n    lcd_rect(10, 40, 108, 14, 0, 0, 40);\n    lcd_text(10, 42, `uptime ${t}s`, 220, 220, 220);\n    lcd_rect(10, 60, 108, 14, 0, 0, 40);\n    let beat = if t % 2 == 0 { \"tick\" } else { \"tock\" };\n    lcd_text(10, 62, beat, 90, 220, 120);\n}\n"
+      },
+      "2": {
+        "id": 2,
+        "def_id": "st7735-tft-128",
+        "pos": [
+          85.0,
+          34.0
+        ],
+        "rotation": 0,
+        "label": "screen",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      }
+    },
+    "wires": {},
+    "next_comp": 3,
+    "next_wire": 1
+  },
+  "program": {
+    "rules": []
+  }
+}

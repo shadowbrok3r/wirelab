@@ -1,0 +1,29 @@
+{
+  "id": "buzzer-passive",
+  "name": "Passive Buzzer",
+  "category": "Output",
+  "description": "Passive piezo buzzer with no internal oscillator; the GPIO must drive it with a PWM tone. Wire the signal (+) pin to a PWM-capable GPIO and the other pin to GND.",
+  "terminals": [
+    { "id": "signal", "name": "Signal (+)", "role": "signal" },
+    { "id": "gnd", "name": "GND (-)", "role": "gnd" }
+  ],
+  "visual": {
+    "shape": "buzzer",
+    "color": [35, 32, 30],
+    "width_mm": 12.0,
+    "height_mm": 12.0
+  },
+  "sim": { "kind": "buzzer", "active": false },
+  "actions": [
+    {
+      "id": "tone",
+      "name": "Play tone",
+      "params": [
+        { "key": "freq_hz", "name": "Frequency (Hz)", "min": 31, "max": 8000, "default": 1000 },
+        { "key": "ms", "name": "Duration (ms)", "min": 20, "max": 10000, "default": 500 }
+      ]
+    },
+    { "id": "off", "name": "Stop" }
+  ],
+  "events": []
+}

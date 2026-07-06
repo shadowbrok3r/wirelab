@@ -1,0 +1,78 @@
+{
+  "id": "st7735-tft-128",
+  "name": "ST7735 1.44\" TFT 128x128 + microSD",
+  "category": "Display",
+  "description": "Adafruit 1.44\" color TFT (ST7735R) with a microSD slot, both on SPI. VIN takes 3.3-5V (onboard regulator; the 3V3 pin is its output), D/C selects data vs command, TFT_CS and CARD_CS select the display or the SD card, LITE dims the backlight (PWM-able). Display driving needs firmware support (planned) \u2014 wire and label it now.",
+  "terminals": [
+    {
+      "id": "vin",
+      "name": "VIN",
+      "role": "vcc"
+    },
+    {
+      "id": "3v3",
+      "name": "3.3V out",
+      "role": "end_a"
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "role": "gnd"
+    },
+    {
+      "id": "sck",
+      "name": "SCK",
+      "role": "normally_closed"
+    },
+    {
+      "id": "miso",
+      "name": "MISO",
+      "role": "common"
+    },
+    {
+      "id": "mosi",
+      "name": "MOSI",
+      "role": "normally_open"
+    },
+    {
+      "id": "tft_cs",
+      "name": "TFT_CS",
+      "role": "signal"
+    },
+    {
+      "id": "reset",
+      "name": "RESET",
+      "role": "a"
+    },
+    {
+      "id": "dc",
+      "name": "D/C",
+      "role": "b"
+    },
+    {
+      "id": "card_cs",
+      "name": "CARD_CS",
+      "role": "end_b"
+    },
+    {
+      "id": "lite",
+      "name": "LITE (backlight)",
+      "role": "wiper"
+    }
+  ],
+  "visual": {
+    "shape": "chip",
+    "color": [
+      140,
+      40,
+      40
+    ],
+    "width_mm": 34.0,
+    "height_mm": 42.0
+  },
+  "sim": {
+    "kind": "generic"
+  },
+  "actions": [],
+  "events": []
+}

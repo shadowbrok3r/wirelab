@@ -1,0 +1,23 @@
+{
+  "id": "potentiometer-10k",
+  "name": "10k Potentiometer",
+  "category": "Analog",
+  "description": "10 kΩ rotary potentiometer. Wire end A to 3V3 and end B to GND, then read the wiper voltage on an ADC-capable GPIO.",
+  "terminals": [
+    { "id": "end_a", "name": "End A", "role": "end_a" },
+    { "id": "end_b", "name": "End B", "role": "end_b" },
+    { "id": "wiper", "name": "Wiper", "role": "wiper" }
+  ],
+  "visual": {
+    "shape": "potentiometer",
+    "color": [55, 105, 210],
+    "width_mm": 16.0,
+    "height_mm": 16.0
+  },
+  "sim": { "kind": "potentiometer", "ohms": 10000 },
+  "actions": [],
+  "events": [],
+  "props": [
+    { "key": "ohms", "name": "Resistance (Ω)", "min": 1000, "max": 1000000, "default": 10000 }
+  ]
+}

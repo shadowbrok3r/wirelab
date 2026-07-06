@@ -1,0 +1,24 @@
+{
+  "id": "touch-sensor-ttp223",
+  "name": "Touch Sensor (TTP223)",
+  "category": "Input",
+  "description": "TTP223 capacitive touch pad; OUT goes high while the pad is touched. Wire VCC to 3V3, GND to GND and OUT (I/O) to a GPIO.",
+  "terminals": [
+    { "id": "vcc", "name": "VCC", "role": "vcc" },
+    { "id": "gnd", "name": "GND", "role": "gnd" },
+    { "id": "signal", "name": "OUT", "role": "signal" }
+  ],
+  "visual": {
+    "shape": "sensor_module",
+    "color": [50, 90, 190],
+    "width_mm": 24.0,
+    "height_mm": 24.0
+  },
+  "sim": { "kind": "digital_sensor" },
+  "actions": [],
+  "events": [
+    { "id": "high", "name": "Touched" },
+    { "id": "low", "name": "Released" },
+    { "id": "changed", "name": "Changed" }
+  ]
+}

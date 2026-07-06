@@ -1,0 +1,28 @@
+{
+  "id": "servo-sg90",
+  "name": "SG90 Micro Servo",
+  "category": "Output",
+  "description": "9g hobby servo with 0-180 degree travel. Wire orange to a PWM-capable GPIO, red to 5V (a 5V supply is recommended; 3V3 gives weak torque), and brown to GND.",
+  "terminals": [
+    { "id": "vcc", "name": "VCC (red)", "role": "vcc" },
+    { "id": "gnd", "name": "GND (brown)", "role": "gnd" },
+    { "id": "signal", "name": "Signal (orange)", "role": "signal" }
+  ],
+  "visual": {
+    "shape": "servo",
+    "color": [70, 130, 200],
+    "width_mm": 23.0,
+    "height_mm": 12.0
+  },
+  "sim": { "kind": "servo" },
+  "actions": [
+    {
+      "id": "set_angle",
+      "name": "Set angle",
+      "params": [
+        { "key": "degrees", "name": "Angle (deg)", "min": 0, "max": 180, "default": 90 }
+      ]
+    }
+  ],
+  "events": []
+}

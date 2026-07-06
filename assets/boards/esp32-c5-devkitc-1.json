@@ -1,0 +1,389 @@
+{
+  "id": "esp32-c5-devkitc-1",
+  "name": "ESP32-C5-DevKitC-1",
+  "chip": "Esp32C5",
+  "description": "Espressif ESP32-C5 devkit: dual-band Wi-Fi 6 RISC-V chip. WireLab talks to it over the UART USB port (UART0, GPIO11/12), so leave TX/RX unwired.",
+  "width_mm": 27.0,
+  "height_mm": 60.0,
+  "notes": [
+    "On-board addressable RGB LED on GPIO27 (WS2812 protocol \u2014 not a plain GPIO LED).",
+    "UART0 (GPIO11/12) carries the WireLab protocol on this board; the pins are reserved.",
+    "GPIO15 position is NC unless the module has no in-package PSRAM.",
+    "ADC1 channels 0-5 sit on GPIO1-6."
+  ],
+  "pins": [
+    {
+      "key": "3V3",
+      "label": "3V3",
+      "kind": "V3_3",
+      "side": "Left",
+      "index": 15
+    },
+    {
+      "key": "EN",
+      "label": "RST",
+      "kind": "En",
+      "side": "Left",
+      "index": 14
+    },
+    {
+      "key": "GPIO2",
+      "label": "2",
+      "kind": {
+        "Gpio": 2
+      },
+      "side": "Left",
+      "index": 13,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | ADC | STRAPPING",
+      "adc": [
+        1,
+        1
+      ],
+      "warning": "Strapping pin (MTMS); keep it in a safe state at reset",
+      "tags": [
+        "fspi",
+        "lp-i2c",
+        "lp-uart",
+        "lp-gpio",
+        "jtag"
+      ]
+    },
+    {
+      "key": "GPIO3",
+      "label": "3",
+      "kind": {
+        "Gpio": 3
+      },
+      "side": "Left",
+      "index": 12,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | ADC | STRAPPING",
+      "adc": [
+        1,
+        2
+      ],
+      "warning": "Strapping pin (MTDI); keep it in a safe state at reset",
+      "tags": [
+        "lp-i2c",
+        "lp-uart",
+        "lp-gpio",
+        "jtag"
+      ]
+    },
+    {
+      "key": "GPIO0",
+      "label": "0",
+      "kind": {
+        "Gpio": 0
+      },
+      "side": "Left",
+      "index": 11,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM",
+      "tags": [
+        "lp-uart",
+        "lp-gpio",
+        "xtal32k"
+      ]
+    },
+    {
+      "key": "GPIO1",
+      "label": "1",
+      "kind": {
+        "Gpio": 1
+      },
+      "side": "Left",
+      "index": 10,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | ADC",
+      "adc": [
+        1,
+        0
+      ],
+      "tags": [
+        "lp-uart",
+        "lp-gpio",
+        "xtal32k"
+      ]
+    },
+    {
+      "key": "GPIO6",
+      "label": "6",
+      "kind": {
+        "Gpio": 6
+      },
+      "side": "Left",
+      "index": 9,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | ADC",
+      "adc": [
+        1,
+        5
+      ],
+      "tags": [
+        "fspi",
+        "lp-gpio"
+      ]
+    },
+    {
+      "key": "GPIO7",
+      "label": "7",
+      "kind": {
+        "Gpio": 7
+      },
+      "side": "Left",
+      "index": 8,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | STRAPPING",
+      "warning": "Strapping pin; keep it in a safe state at reset",
+      "tags": [
+        "sdio",
+        "fspi"
+      ]
+    },
+    {
+      "key": "GPIO8",
+      "label": "8",
+      "kind": {
+        "Gpio": 8
+      },
+      "side": "Left",
+      "index": 7,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM",
+      "tags": [
+        "sdio",
+        "pad-comp"
+      ]
+    },
+    {
+      "key": "GPIO9",
+      "label": "9",
+      "kind": {
+        "Gpio": 9
+      },
+      "side": "Left",
+      "index": 6,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM",
+      "tags": [
+        "sdio",
+        "pad-comp"
+      ]
+    },
+    {
+      "key": "GPIO10",
+      "label": "10",
+      "kind": {
+        "Gpio": 10
+      },
+      "side": "Left",
+      "index": 5,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM",
+      "tags": [
+        "sdio",
+        "fspi"
+      ]
+    },
+    {
+      "key": "GPIO26",
+      "label": "26",
+      "kind": {
+        "Gpio": 26
+      },
+      "side": "Left",
+      "index": 4,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | STRAPPING",
+      "warning": "Strapping pin; keep it in a safe state at reset"
+    },
+    {
+      "key": "GPIO25",
+      "label": "25",
+      "kind": {
+        "Gpio": 25
+      },
+      "side": "Left",
+      "index": 3,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | STRAPPING",
+      "warning": "Strapping pin; keep it in a safe state at reset"
+    },
+    {
+      "key": "5V",
+      "label": "5V",
+      "kind": "V5",
+      "side": "Left",
+      "index": 2
+    },
+    {
+      "key": "GND1",
+      "label": "G",
+      "kind": "Gnd",
+      "side": "Left",
+      "index": 1
+    },
+    {
+      "key": "GND2",
+      "label": "G",
+      "kind": "Gnd",
+      "side": "Right",
+      "index": 15
+    },
+    {
+      "key": "GPIO11",
+      "label": "TX",
+      "kind": {
+        "Gpio": 11
+      },
+      "side": "Right",
+      "index": 14,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | UART0",
+      "warning": "UART0 TX \u2014 reserved for the WireLab serial link on this board"
+    },
+    {
+      "key": "GPIO12",
+      "label": "RX",
+      "kind": {
+        "Gpio": 12
+      },
+      "side": "Right",
+      "index": 13,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | UART0",
+      "warning": "UART0 RX \u2014 reserved for the WireLab serial link on this board"
+    },
+    {
+      "key": "GPIO24",
+      "label": "24",
+      "kind": {
+        "Gpio": 24
+      },
+      "side": "Right",
+      "index": 12,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM"
+    },
+    {
+      "key": "GPIO23",
+      "label": "23",
+      "kind": {
+        "Gpio": 23
+      },
+      "side": "Right",
+      "index": 11,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM"
+    },
+    {
+      "key": "GPIO27",
+      "label": "27",
+      "kind": {
+        "Gpio": 27
+      },
+      "side": "Right",
+      "index": 9,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | STRAPPING",
+      "warning": "Drives the on-board WS2812 RGB LED; also a strapping pin",
+      "tags": [
+        "rgb-led"
+      ]
+    },
+    {
+      "key": "GPIO4",
+      "label": "4",
+      "kind": {
+        "Gpio": 4
+      },
+      "side": "Right",
+      "index": 8,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | ADC",
+      "adc": [
+        1,
+        3
+      ],
+      "tags": [
+        "jtag",
+        "lp-gpio",
+        "lp-uart",
+        "fspi"
+      ]
+    },
+    {
+      "key": "GPIO5",
+      "label": "5",
+      "kind": {
+        "Gpio": 5
+      },
+      "side": "Right",
+      "index": 7,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | ADC",
+      "adc": [
+        1,
+        4
+      ],
+      "tags": [
+        "jtag",
+        "lp-gpio",
+        "lp-uart",
+        "fspi"
+      ]
+    },
+    {
+      "key": "GPIO28",
+      "label": "28",
+      "kind": {
+        "Gpio": 28
+      },
+      "side": "Right",
+      "index": 5,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | STRAPPING",
+      "warning": "Strapping pin; keep it in a safe state at reset"
+    },
+    {
+      "key": "GND3",
+      "label": "G",
+      "kind": "Gnd",
+      "side": "Right",
+      "index": 4
+    },
+    {
+      "key": "GPIO14",
+      "label": "14",
+      "kind": {
+        "Gpio": 14
+      },
+      "side": "Right",
+      "index": 3,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | USB_JTAG",
+      "warning": "USB D+ \u2014 wiring it breaks the native USB port",
+      "tags": [
+        "sdio"
+      ]
+    },
+    {
+      "key": "GPIO13",
+      "label": "13",
+      "kind": {
+        "Gpio": 13
+      },
+      "side": "Right",
+      "index": 2,
+      "caps": "DIGITAL_IN | DIGITAL_OUT | PWM | USB_JTAG",
+      "warning": "USB D- \u2014 wiring it breaks the native USB port",
+      "tags": [
+        "sdio"
+      ]
+    },
+    {
+      "key": "GND4",
+      "label": "G",
+      "kind": "Gnd",
+      "side": "Right",
+      "index": 1
+    }
+  ],
+  "specs": [
+    "32-bit RISC-V single-core @ 240 MHz",
+    "Wi-Fi 6 (802.11ax), 2.4 & 5 GHz",
+    "Bluetooth LE 5",
+    "802.15.4 (Zigbee / Thread)",
+    "384 KB SRAM, 320 KB ROM",
+    "29 GPIOs, 2x SPI, 2x UART, 1x I2C, RMT",
+    "LED PWM 6 ch, 12-bit ADC (6 ch), TWAI (CAN), MCPWM",
+    "USB Serial/JTAG, ETM"
+  ],
+  "features": {
+    "rgb_led_gpio": 27,
+    "reset_button": true,
+    "boot_button_gpio": 28
+  }
+}

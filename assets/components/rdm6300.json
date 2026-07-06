@@ -1,0 +1,61 @@
+{
+  "id": "rdm6300",
+  "name": "RDM6300 RFID reader (125 kHz)",
+  "category": "Input",
+  "description": "EM4100 tag reader. TX streams tag ids as 9600-baud UART \u2014 wire it to a GPIO and read with a second UART (firmware support planned; the pin shows as a logic level for now). ANT pins go to the coil antenna.",
+  "terminals": [
+    {
+      "id": "vcc",
+      "name": "VCC",
+      "role": "vcc"
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "role": "gnd"
+    },
+    {
+      "id": "tx",
+      "name": "TX (UART out)",
+      "role": "signal"
+    },
+    {
+      "id": "ant1",
+      "name": "ANT1",
+      "role": "a"
+    },
+    {
+      "id": "ant2",
+      "name": "ANT2",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "chip",
+    "color": [
+      40,
+      90,
+      60
+    ],
+    "width_mm": 20.0,
+    "height_mm": 14.0
+  },
+  "sim": {
+    "kind": "digital_sensor"
+  },
+  "actions": [],
+  "events": [
+    {
+      "id": "high",
+      "name": "TX high"
+    },
+    {
+      "id": "low",
+      "name": "TX low"
+    },
+    {
+      "id": "changed",
+      "name": "Changed"
+    }
+  ]
+}

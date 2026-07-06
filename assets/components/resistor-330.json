@@ -1,0 +1,34 @@
+{
+  "id": "resistor-330",
+  "name": "330 Ohm Resistor",
+  "category": "Passive",
+  "description": "330 ohm 1/4W resistor. Gentler LED series resistor; classic choice on 5V logic, dimmer on 3.3V. Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 330.0
+  },
+  "actions": [],
+  "events": []
+}

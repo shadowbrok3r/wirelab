@@ -1,0 +1,135 @@
+{
+  "name": "Ohmmeter (identify a resistor)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "junction-dot",
+        "pos": [
+          70.0,
+          8.0
+        ],
+        "rotation": 0,
+        "label": "meter",
+        "props": {},
+        "state": {
+          "kind": "none"
+        },
+        "script": "// Ohmmeter! Identify an unknown resistor with one known resistor.\n//\n// Wire:  3V3 -> unknown R -> GPIO1   and   GPIO1 -> known 1k -> GND\n// The pair divides 3.3 V; from the midpoint we solve for the unknown:\n//     R = R_known * (3300 - mv) / mv\n//\n// IMPORTANT: the ESP32 ADC tops out near ~3.1 V (readings peg at 3100),\n// so the reference works best within ~10x of the unknown. This script\n// detects pegged readings and tells you which way to swap.\n//\n// In this example the \"unknown\" is a 4.7k so the sim can demo it.\n\nconst KNOWN = 1000.0;                // your reference resistor, ohms\n\nfn on_start() {\n    pin(1).watch_analog(200);        // ADC samples every 200 ms\n    this.last = 0;\n    log(\"measuring the resistor between 3V3 and GPIO1...\");\n}\n\nfn on_tick(dt_ms) {\n    let mv = pin(1).millivolts();\n    if mv == 0 {\n        return;                      // no sample yet\n    }\n    if mv >= 2950 {\n        report(0, \"pegged HIGH - unknown is much smaller than the reference; use a smaller known R\");\n        return;\n    }\n    if mv <= 100 {\n        report(0, \"pegged LOW - unknown is much bigger than the reference; use a bigger known R\");\n        return;\n    }\n    let r = (KNOWN * (3300.0 - mv.to_float()) / mv.to_float()).to_int();\n    report(r, `= ${r} ohm, nearest standard: ${e12(r)} ohm  (GPIO1 at ${mv} mV)`);\n}\n\n// Log only when the value moved by more than ~5%.\nfn report(r, text) {\n    if (r - this.last).abs() * 20 > this.last || (r == 0 && this.last != 0) {\n        this.last = r;\n        log(text);\n    }\n}\n\n// Snap to the closest E12 series value (what resistors actually come in).\nfn e12(r) {\n    if r <= 0 { return 0; }\n    let series = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82];\n    let scale = 1;\n    let base = r;\n    while base >= 100 {\n        base /= 10;\n        scale *= 10;\n    }\n    let best = 10;\n    let dist = 999999;\n    for s in series {\n        let d = (s - base).abs();\n        if d < dist {\n            dist = d;\n            best = s;\n        }\n    }\n    best * scale\n}\n"
+      },
+      "2": {
+        "id": 2,
+        "def_id": "resistor-4k7",
+        "pos": [
+          58.0,
+          20.0
+        ],
+        "rotation": 0,
+        "label": "unknown",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      },
+      "3": {
+        "id": 3,
+        "def_id": "resistor-1k",
+        "pos": [
+          58.0,
+          34.0
+        ],
+        "rotation": 0,
+        "label": "known_1k",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      }
+    },
+    "wires": {
+      "1": {
+        "id": 1,
+        "a": {
+          "at": "board_pin",
+          "key": "3V3"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "a"
+        },
+        "color": [
+          220,
+          60,
+          50
+        ],
+        "waypoints": []
+      },
+      "2": {
+        "id": 2,
+        "a": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO1"
+        },
+        "color": [
+          190,
+          120,
+          255
+        ],
+        "waypoints": []
+      },
+      "3": {
+        "id": 3,
+        "a": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "a"
+        },
+        "color": [
+          190,
+          120,
+          255
+        ],
+        "waypoints": []
+      },
+      "4": {
+        "id": 4,
+        "a": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND1"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      }
+    },
+    "next_comp": 4,
+    "next_wire": 5
+  },
+  "program": {
+    "rules": []
+  }
+}

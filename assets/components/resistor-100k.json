@@ -1,0 +1,34 @@
+{
+  "id": "resistor-100k",
+  "name": "100 kOhm Resistor",
+  "category": "Passive",
+  "description": "100 kohm 1/4W resistor. Very weak pull, RC timing, and high-impedance divider work. Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 100000.0
+  },
+  "actions": [],
+  "events": []
+}

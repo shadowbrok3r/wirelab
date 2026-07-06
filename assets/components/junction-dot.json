@@ -1,0 +1,18 @@
+{
+  "id": "junction-dot",
+  "name": "Junction",
+  "category": "Routing",
+  "description": "Wire-routing dot with no electrical behavior of its own: every wire attached to it joins the same net. Drop these to break long wires into tidy segments, ComfyUI-style.",
+  "terminals": [
+    { "id": "a", "name": "Node", "role": "a" }
+  ],
+  "visual": {
+    "shape": "dot",
+    "color": [150, 150, 170],
+    "width_mm": 2.4,
+    "height_mm": 2.4
+  },
+  "sim": { "kind": "generic" },
+  "actions": [],
+  "events": []
+}

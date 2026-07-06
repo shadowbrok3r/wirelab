@@ -1,0 +1,35 @@
+[package]
+name = "wirelab-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WireLab desktop app: live ESP32 circuit builder and IDE"
+
+[[bin]]
+name = "wirelab"
+path = "src/main.rs"
+
+[dependencies]
+wirelab-proto = { workspace = true }
+wirelab-core = { workspace = true }
+wirelab-link = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+egui_extras = { workspace = true }
+egui-phosphor = { workspace = true }
+egui-snarl = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rfd = { workspace = true }
+ureq = { workspace = true }
+directories = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+rhai-rowan = { workspace = true }
+rhai-hir = { workspace = true }
+url = { workspace = true }
+rmcp = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+schemars = { workspace = true }

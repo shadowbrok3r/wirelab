@@ -1,0 +1,20 @@
+{
+  "id": "generic-analog-sensor",
+  "name": "Generic Analog Sensor",
+  "category": "Analog",
+  "description": "Three-pin analog sensor module outputting 0-3.3 V on its signal pin. Wire VCC to 3V3, GND to GND, and the signal pin to an ADC-capable GPIO.",
+  "terminals": [
+    { "id": "vcc", "name": "VCC", "role": "vcc" },
+    { "id": "gnd", "name": "GND", "role": "gnd" },
+    { "id": "signal", "name": "Signal", "role": "signal" }
+  ],
+  "visual": {
+    "shape": "sensor_module",
+    "color": [60, 60, 150],
+    "width_mm": 24.0,
+    "height_mm": 33.0
+  },
+  "sim": { "kind": "analog_sensor", "min_mv": 0, "max_mv": 3300 },
+  "actions": [],
+  "events": []
+}

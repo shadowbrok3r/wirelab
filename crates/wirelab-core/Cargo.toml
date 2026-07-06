@@ -1,0 +1,15 @@
+[package]
+name = "wirelab-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Circuit model, board profiles, netlist, simulation and rules engine for WireLab"
+
+[dependencies]
+wirelab-proto = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bitflags = { workspace = true }
+rhai = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

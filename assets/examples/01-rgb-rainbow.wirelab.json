@@ -1,0 +1,33 @@
+{
+  "name": "RGB rainbow (board only)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "junction-dot",
+        "pos": [
+          55.0,
+          12.0
+        ],
+        "rotation": 0,
+        "label": "main",
+        "props": {},
+        "state": {
+          "kind": "none"
+        },
+        "script": "// Rainbow-pulse the on-board WS2812. Press BOOT to change speed.\n// Everything runs live: just Connect (simulator or the real board).\n\nfn on_start() {\n    pin(28).input_pullup();          // BOOT button (GPIO28)\n    this.hue = 0.0;\n    this.speed = 1.0;\n    log(\"rainbow running - press BOOT to change speed\");\n}\n\nfn on_tick(dt_ms) {\n    this.hue = (this.hue + dt_ms.to_float() * 0.06 * this.speed) % 360.0;\n    let c = hsv(this.hue, 1.0, 0.35);\n    rgb(c[0], c[1], c[2]);\n}\n\nfn on_pin(gpio, high) {\n    if gpio == 28 && !high {         // pressed = pulled low\n        this.speed = if this.speed >= 8.0 { 0.5 } else { this.speed * 2.0 };\n        log(`speed x${this.speed}`);\n    }\n}\n\n// Classic HSV -> RGB; returns [r, g, b] as 0..255 ints.\nfn hsv(h, s, v) {\n    let c = v * s;\n    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());\n    let m = v - c;\n    let f = if h < 60.0 { [c, x, 0.0] }\n        else if h < 120.0 { [x, c, 0.0] }\n        else if h < 180.0 { [0.0, c, x] }\n        else if h < 240.0 { [0.0, x, c] }\n        else if h < 300.0 { [x, 0.0, c] }\n        else { [c, 0.0, x] };\n    [((f[0] + m) * 255.0).to_int(),\n     ((f[1] + m) * 255.0).to_int(),\n     ((f[2] + m) * 255.0).to_int()]\n}\n"
+      }
+    },
+    "wires": {},
+    "next_comp": 2,
+    "next_wire": 1
+  },
+  "program": {
+    "rules": []
+  }
+}

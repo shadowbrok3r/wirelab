@@ -1,0 +1,33 @@
+{
+  "name": "Morse beacon (advanced scripting)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "junction-dot",
+        "pos": [
+          70.0,
+          8.0
+        ],
+        "rotation": 0,
+        "label": "beacon",
+        "props": {},
+        "state": {
+          "kind": "none"
+        },
+        "script": "// Morse beacon - an advanced script: functions, maps, arrays and a\n// tick-driven state machine (never block, never wait - schedule!).\n// The RGB LED flashes the message; BOOT cycles messages.\n\nfn on_start() {\n    pin(28).input_pullup();          // BOOT button\n    this.msgs = [\"SOS\", \"HELLO\", \"WIRELAB\"];\n    this.i = 0;\n    this.q = [];                     // queued [on, units] steps\n    this.t = 0;\n    log(\"beaconing SOS - press BOOT to change the message\");\n}\n\nfn on_tick(dt_ms) {\n    this.t -= dt_ms;\n    if this.t > 0 { return; }\n    if this.q.len == 0 {\n        this.q = plan(this.msgs[this.i]);\n    }\n    let step = this.q[0];\n    this.q.remove(0);\n    if step[0] == 1 {\n        rgb(0, 90, 30);\n    } else {\n        rgb(0, 0, 0);\n    }\n    this.t = step[1] * 90;           // ms per morse unit\n}\n\nfn on_pin(gpio, high) {\n    if gpio == 28 && !high {\n        this.i = (this.i + 1) % this.msgs.len;\n        this.q = [];\n        this.t = 0;\n        rgb(0, 0, 0);\n        log(`message: ${this.msgs[this.i]}`);\n    }\n}\n\n// Turn a message into [on, duration-units] steps.\n// Maps pass by reference in Rhai; arrays make fine little structs.\nfn plan(msg) {\n    let code = #{\n        \"A\": \".-\",   \"B\": \"-...\", \"E\": \".\",    \"H\": \"....\",\n        \"I\": \"..\",   \"L\": \".-..\", \"O\": \"---\",  \"R\": \".-.\",\n        \"S\": \"...\",  \"W\": \".--\",\n    };\n    let q = [];\n    for ch in msg.chars() {\n        if ch == ' ' {\n            q.push([0, 7]);          // word gap\n            continue;\n        }\n        let sym = code[`${ch}`];\n        if sym == () { continue; }   // unknown letter: skip\n        for m in sym.chars() {\n            q.push([1, if m == '.' { 1 } else { 3 }]);\n            q.push([0, 1]);          // intra-letter gap\n        }\n        q.push([0, 3]);              // letter gap\n    }\n    q.push([0, 12]);                 // message gap, then repeat\n    q\n}\n"
+      }
+    },
+    "wires": {},
+    "next_comp": 2,
+    "next_wire": 1
+  },
+  "program": {
+    "rules": []
+  }
+}

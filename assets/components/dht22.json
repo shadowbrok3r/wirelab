@@ -1,0 +1,51 @@
+{
+  "id": "dht22",
+  "name": "DHT22 humidity & temp",
+  "category": "Input",
+  "description": "AM2302/DHT22 humidity + temperature sensor. Wire VCC to 3V3, GND to GND, DATA to any GPIO (a 10k pull-up between DATA and VCC helps on long leads). NOTE: it speaks a timing-critical 1-wire protocol the WireLab firmware cannot decode yet \u2014 the pin shows as a logic level for now.",
+  "terminals": [
+    {
+      "id": "vcc",
+      "name": "VCC",
+      "role": "vcc"
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "role": "gnd"
+    },
+    {
+      "id": "data",
+      "name": "DATA",
+      "role": "signal"
+    }
+  ],
+  "visual": {
+    "shape": "sensor_module",
+    "color": [
+      235,
+      235,
+      235
+    ],
+    "width_mm": 10.0,
+    "height_mm": 14.0
+  },
+  "sim": {
+    "kind": "digital_sensor"
+  },
+  "actions": [],
+  "events": [
+    {
+      "id": "high",
+      "name": "Data high"
+    },
+    {
+      "id": "low",
+      "name": "Data low"
+    },
+    {
+      "id": "changed",
+      "name": "Changed"
+    }
+  ]
+}

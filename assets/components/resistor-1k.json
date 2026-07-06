@@ -1,0 +1,19 @@
+{
+  "id": "resistor-1k",
+  "name": "1 kOhm Resistor",
+  "category": "Passive",
+  "description": "1 kilohm 1/4W resistor for gentle LED current limiting or transistor base drive. Not polarized; either lead can face the GPIO.",
+  "terminals": [
+    { "id": "a", "name": "Lead A", "role": "a" },
+    { "id": "b", "name": "Lead B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [210, 180, 135],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": { "kind": "resistor", "ohms": 1000.0 },
+  "actions": [],
+  "events": []
+}

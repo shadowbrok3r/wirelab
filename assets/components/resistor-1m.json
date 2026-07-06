@@ -1,0 +1,34 @@
+{
+  "id": "resistor-1m",
+  "name": "1 MOhm Resistor",
+  "category": "Passive",
+  "description": "1 Mohm 1/4W resistor. Touch/leak sensing, ADC input bleed, very long RC time constants. Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 1000000.0
+  },
+  "actions": [],
+  "events": []
+}

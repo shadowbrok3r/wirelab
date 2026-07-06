@@ -1,0 +1,34 @@
+{
+  "id": "resistor-4k7",
+  "name": "4.7 kOhm Resistor",
+  "category": "Passive",
+  "description": "4.7 kohm 1/4W resistor. The usual I2C pull-up value; also common in voltage dividers. Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 4700.0
+  },
+  "actions": [],
+  "events": []
+}

@@ -1,0 +1,204 @@
+{
+  "name": "Reaction timer (button + LED + buzzer)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "push-button",
+        "pos": [
+          57.0,
+          17.0
+        ],
+        "rotation": 270,
+        "label": "btn",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        },
+        "script": "// Reaction timer! Press to start; when the LED lights, press as\n// fast as you can. Works in the sim (click-hold the button) and on\n// real hardware alike.\n//\n// You are `btn`. `red_led` and `buzzer` are addressed by name.\n// State machine lives on `this`: \"idle\" -> \"armed\" -> \"lit\".\n\nfn on_start() {\n    this.state = \"idle\";\n    red_led.off();\n    log(\"press the button to start a round\");\n}\n\nfn on_press() {\n    switch this.state {\n        \"idle\" => {\n            this.state = \"armed\";\n            // No random numbers in scripts - millis() jitter works fine.\n            this.due = millis() + 800 + millis() % 1800;\n            log(\"get ready...\");\n        },\n        \"lit\" => {\n            let ms = millis() - this.lit_at;\n            log(`reaction: ${ms} ms`);\n            buzzer.beep(120);\n            red_led.off();\n            this.state = \"idle\";\n        },\n        _ => {\n            log(\"too early!\");\n\t\t\tbuzzer.tone(1000, 400);\n            buzzer.beep(400);\n            red_led.off();\n            this.state = \"idle\";\n        }\n    }\n}\n\n// on_tick drives the delay so `this` stays writable (after() closures\n// can't touch `this`).\nfn on_tick(dt_ms) {\n    if this.state == \"armed\" && millis() >= this.due {\n        this.state = \"lit\";\n        this.lit_at = millis();\n        red_led.on();\n    }\n}\n"
+      },
+      "2": {
+        "id": 2,
+        "def_id": "led-red",
+        "pos": [
+          -23.0,
+          10.0
+        ],
+        "rotation": 90,
+        "label": "red_led",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      },
+      "3": {
+        "id": 3,
+        "def_id": "buzzer-active",
+        "pos": [
+          65.0,
+          32.0
+        ],
+        "rotation": 90,
+        "label": "buzzer",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      },
+      "4": {
+        "id": 4,
+        "def_id": "resistor-220",
+        "pos": [
+          20.0,
+          -11.0
+        ],
+        "rotation": 0,
+        "label": "",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      }
+    },
+    "wires": {
+      "2": {
+        "id": 2,
+        "a": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "cathode"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND1"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "3": {
+        "id": 3,
+        "a": {
+          "at": "board_pin",
+          "key": "GPIO4"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 1,
+          "terminal": "a"
+        },
+        "color": [
+          90,
+          210,
+          200
+        ],
+        "waypoints": []
+      },
+      "4": {
+        "id": 4,
+        "a": {
+          "at": "terminal",
+          "comp": 1,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND2"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "5": {
+        "id": 5,
+        "a": {
+          "at": "board_pin",
+          "key": "GPIO24"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "signal"
+        },
+        "color": [
+          255,
+          150,
+          60
+        ],
+        "waypoints": []
+      },
+      "6": {
+        "id": 6,
+        "a": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "gnd"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND3"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "7": {
+        "id": 7,
+        "a": {
+          "at": "board_pin",
+          "key": "GPIO2"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 4,
+          "terminal": "a"
+        },
+        "color": [
+          86,
+          156,
+          255
+        ],
+        "waypoints": []
+      },
+      "8": {
+        "id": 8,
+        "a": {
+          "at": "terminal",
+          "comp": 4,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "anode"
+        },
+        "color": [
+          86,
+          156,
+          255
+        ],
+        "waypoints": []
+      }
+    },
+    "next_comp": 5,
+    "next_wire": 9
+  },
+  "program": {
+    "rules": []
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "resistor-10k",
+  "name": "10 kOhm Resistor",
+  "category": "Passive",
+  "description": "10 kilohm 1/4W resistor, common as a pull-up or pull-down and as the fixed half of a voltage divider with a photoresistor. Not polarized.",
+  "terminals": [
+    { "id": "a", "name": "Lead A", "role": "a" },
+    { "id": "b", "name": "Lead B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [200, 170, 125],
+    "width_mm": 10.0,
+    "height_mm": 3.0
+  },
+  "sim": { "kind": "resistor", "ohms": 10000.0 },
+  "actions": [],
+  "events": []
+}

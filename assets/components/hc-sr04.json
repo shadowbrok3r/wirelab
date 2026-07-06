@@ -1,0 +1,56 @@
+{
+  "id": "hc-sr04",
+  "name": "HC-SR04 ultrasonic",
+  "category": "Input",
+  "description": "Ultrasonic distance sensor: pulse TRIG high for 10 \u00b5s, then measure how long ECHO stays high (58 \u00b5s per cm). Prefers 5V power; ECHO is 5V too \u2014 use a divider into the GPIO on real hardware. Live distance timing needs firmware support (planned); ECHO shows as a logic level for now.",
+  "terminals": [
+    {
+      "id": "vcc",
+      "name": "VCC (5V)",
+      "role": "vcc"
+    },
+    {
+      "id": "trig",
+      "name": "TRIG",
+      "role": "a"
+    },
+    {
+      "id": "echo",
+      "name": "ECHO",
+      "role": "signal"
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "role": "gnd"
+    }
+  ],
+  "visual": {
+    "shape": "sensor_module",
+    "color": [
+      60,
+      110,
+      220
+    ],
+    "width_mm": 18.0,
+    "height_mm": 10.0
+  },
+  "sim": {
+    "kind": "digital_sensor"
+  },
+  "actions": [],
+  "events": [
+    {
+      "id": "high",
+      "name": "Echo high"
+    },
+    {
+      "id": "low",
+      "name": "Echo low"
+    },
+    {
+      "id": "changed",
+      "name": "Changed"
+    }
+  ]
+}

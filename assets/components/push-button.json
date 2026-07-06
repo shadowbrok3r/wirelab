@@ -1,0 +1,23 @@
+{
+  "id": "push-button",
+  "name": "Push Button",
+  "category": "Input",
+  "description": "Momentary tactile switch. Wire one side to a GPIO and the other to GND; the pin is configured with an internal pull-up automatically.",
+  "terminals": [
+    { "id": "a", "name": "Side A", "role": "a" },
+    { "id": "b", "name": "Side B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "push_button",
+    "color": [70, 70, 78],
+    "width_mm": 9.0,
+    "height_mm": 9.0
+  },
+  "sim": { "kind": "push_button" },
+  "actions": [],
+  "events": [
+    { "id": "pressed", "name": "Pressed" },
+    { "id": "released", "name": "Released" },
+    { "id": "changed", "name": "Changed" }
+  ]
+}

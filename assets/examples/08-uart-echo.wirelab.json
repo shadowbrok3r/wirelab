@@ -1,0 +1,33 @@
+{
+  "name": "UART echo (serial from scripts)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "junction-dot",
+        "pos": [
+          70.0,
+          8.0
+        ],
+        "rotation": 0,
+        "label": "serial",
+        "props": {},
+        "state": {
+          "kind": "none"
+        },
+        "script": "// UART echo - talk to serial hardware from a script.\n//\n// uart(tx, rx, baud) claims UART1 on any free pins; uart_send() transmits;\n// complete lines come back through on_uart(line).\n//\n// SIMULATOR: writes loop straight back, so this works with zero wiring.\n// REAL BOARD: jumper GPIO4 -> GPIO5 for the same echo, or wire a real\n// device (RDM6300 TX -> GPIO5 at 9600 baud and just read tags in on_uart).\n\nfn on_start() {\n    this.n = 0;\n    uart(4, 5, 115200);              // TX = GPIO4, RX = GPIO5\n    uart_send(\"hello uart\\n\");\n    log(\"uart up on TX=4 RX=5 @115200\");\n}\n\nfn on_uart(line) {\n    this.n += 1;\n    log(`rx #${this.n}: ${line}`);\n    if this.n < 5 {\n        after(500, || uart_send(`ping\\n`));\n    }\n}\n"
+      }
+    },
+    "wires": {},
+    "next_comp": 2,
+    "next_wire": 1
+  },
+  "program": {
+    "rules": []
+  }
+}

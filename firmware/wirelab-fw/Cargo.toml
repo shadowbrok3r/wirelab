@@ -1,0 +1,64 @@
+[package]
+name = "wirelab-fw"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "WireLab runtime firmware: a hot-reconfigurable pin server for ESP32 chips"
+[dependencies]
+esp-hal = { version = "1.1.1", features = ["unstable"] }
+esp-bootloader-esp-idf = "0.5.0"
+esp-backtrace = { version = "0.19.0", features = ["panic-handler", "println"] }
+esp-println = { version = "0.17.0" }
+wirelab-proto = { path = "../../crates/wirelab-proto", default-features = false }
+heapless = { version = "0.9.3", default-features = false }
+embedded-io = "0.7.1"
+embedded-graphics = "0.8.1"
+nb = "1.1.0"
+esp-radio = { version = "1.0.0-beta.0", optional = true, features = ["wifi", "unstable"] }
+esp-rtos = { version = "0.3.0", optional = true, features = ["esp-radio", "esp-alloc"] }
+esp-alloc = { version = "0.10.0", optional = true }
+smoltcp = { version = "0.13.1", optional = true, default-features = false, features = [
+    "alloc",
+    "medium-ethernet",
+    "proto-ipv4",
+    "proto-dhcpv4",
+    "socket-dhcpv4",
+    "socket-tcp",
+    "socket-udp",
+] }
+[features]
+default = ["esp32c3"]
+wifi = ["dep:esp-radio", "dep:esp-rtos", "dep:esp-alloc", "dep:smoltcp"]
+esp32c3 = [
+    "esp-hal/esp32c3",
+    "esp-backtrace/esp32c3",
+    "esp-println/esp32c3",
+    "esp-bootloader-esp-idf/esp32c3",
+    "esp-radio?/esp32c3",
+    "esp-rtos?/esp32c3",
+]
+esp32c5 = [
+    "esp-hal/esp32c5",
+    "esp-backtrace/esp32c5",
+    "esp-println/esp32c5",
+    "esp-bootloader-esp-idf/esp32c5",
+    "esp-radio?/esp32c5",
+    "esp-rtos?/esp32c5",
+]
+esp32 = [
+    "esp-hal/esp32",
+    "esp-backtrace/esp32",
+    "esp-println/esp32",
+    "esp-bootloader-esp-idf/esp32",
+]
+esp32s3 = [
+    "esp-hal/esp32s3",
+    "esp-backtrace/esp32s3",
+    "esp-println/esp32s3",
+    "esp-bootloader-esp-idf/esp32s3",
+]
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = true

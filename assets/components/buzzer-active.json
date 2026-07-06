@@ -1,0 +1,29 @@
+{
+  "id": "buzzer-active",
+  "name": "Active Buzzer",
+  "category": "Output",
+  "description": "Active magnetic buzzer with a built-in oscillator; it sounds a fixed tone whenever powered. Wire the signal (+) pin to a GPIO and the other pin to GND.",
+  "terminals": [
+    { "id": "signal", "name": "Signal (+)", "role": "signal" },
+    { "id": "gnd", "name": "GND (-)", "role": "gnd" }
+  ],
+  "visual": {
+    "shape": "buzzer",
+    "color": [25, 25, 28],
+    "width_mm": 12.0,
+    "height_mm": 12.0
+  },
+  "sim": { "kind": "buzzer", "active": true },
+  "actions": [
+    { "id": "on", "name": "Turn on" },
+    { "id": "off", "name": "Turn off" },
+    {
+      "id": "beep",
+      "name": "Beep",
+      "params": [
+        { "key": "ms", "name": "Duration (ms)", "min": 20, "max": 5000, "default": 200 }
+      ]
+    }
+  ],
+  "events": []
+}

@@ -1,0 +1,20 @@
+{
+  "id": "soil-moisture-sensor",
+  "name": "Soil Moisture Sensor",
+  "category": "Analog",
+  "description": "Capacitive soil moisture probe with an analog output of roughly 0.3-3.0 V depending on moisture. Wire VCC to 3V3, GND to GND, and the signal pin to an ADC-capable GPIO.",
+  "terminals": [
+    { "id": "vcc", "name": "VCC", "role": "vcc" },
+    { "id": "gnd", "name": "GND", "role": "gnd" },
+    { "id": "signal", "name": "Signal (AOUT)", "role": "signal" }
+  ],
+  "visual": {
+    "shape": "sensor_module",
+    "color": [40, 62, 120],
+    "width_mm": 23.0,
+    "height_mm": 60.0
+  },
+  "sim": { "kind": "analog_sensor", "min_mv": 300, "max_mv": 3000 },
+  "actions": [],
+  "events": []
+}

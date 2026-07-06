@@ -1,0 +1,205 @@
+{
+  "name": "Night light (LDR dims an LED)",
+  "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "photoresistor-ldr",
+        "pos": [
+          55.0,
+          30.0
+        ],
+        "rotation": 0,
+        "label": "ldr",
+        "props": {},
+        "state": {
+          "kind": "fraction",
+          "value": 0.5
+        },
+        "script": "// Auto night-light: the darker the room, the brighter the LED.\n// The LDR + 10k form a divider into GPIO1 (ADC); drag the LDR's\n// \"light level\" slider in the inspector to try it in the sim.\n//\n// You are `ldr`; readings arrive in on_reading as millivolts.\n\nfn on_start() {\n    this.lo = 4000;\n    this.hi = 0;\n    log(\"cover or uncover the LDR (slider in the sim)\");\n}\n\nfn on_reading(mv) {\n    // Self-calibrating: track the range we have actually seen.\n    if mv < this.lo { this.lo = mv; }\n    if mv > this.hi { this.hi = mv; }\n    if this.hi - this.lo < 200 { return; }     // not enough range yet\n\n    let dark = (this.hi - mv) * 100 / (this.hi - this.lo);\n    if dark > 15 {\n        red_led.dim(dark);                     // 0..100 percent\n    } else {\n        red_led.off();\n    }\n}\n"
+      },
+      "2": {
+        "id": 2,
+        "def_id": "resistor-10k",
+        "pos": [
+          55.0,
+          44.0
+        ],
+        "rotation": 0,
+        "label": "",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      },
+      "3": {
+        "id": 3,
+        "def_id": "led-red",
+        "pos": [
+          55.0,
+          12.0
+        ],
+        "rotation": 0,
+        "label": "red_led",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      },
+      "4": {
+        "id": 4,
+        "def_id": "resistor-220",
+        "pos": [
+          40.0,
+          12.0
+        ],
+        "rotation": 0,
+        "label": "",
+        "props": {},
+        "state": {
+          "kind": "none"
+        }
+      }
+    },
+    "wires": {
+      "1": {
+        "id": 1,
+        "a": {
+          "at": "board_pin",
+          "key": "3V3"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 1,
+          "terminal": "a"
+        },
+        "color": [
+          220,
+          60,
+          50
+        ],
+        "waypoints": []
+      },
+      "2": {
+        "id": 2,
+        "a": {
+          "at": "terminal",
+          "comp": 1,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO1"
+        },
+        "color": [
+          190,
+          120,
+          255
+        ],
+        "waypoints": []
+      },
+      "3": {
+        "id": 3,
+        "a": {
+          "at": "terminal",
+          "comp": 1,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "a"
+        },
+        "color": [
+          190,
+          120,
+          255
+        ],
+        "waypoints": []
+      },
+      "4": {
+        "id": 4,
+        "a": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND1"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "6": {
+        "id": 6,
+        "a": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "cathode"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND2"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "7": {
+        "id": 7,
+        "a": {
+          "at": "board_pin",
+          "key": "GPIO2"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 4,
+          "terminal": "a"
+        },
+        "color": [
+          86,
+          156,
+          255
+        ],
+        "waypoints": []
+      },
+      "8": {
+        "id": 8,
+        "a": {
+          "at": "terminal",
+          "comp": 4,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "anode"
+        },
+        "color": [
+          86,
+          156,
+          255
+        ],
+        "waypoints": []
+      }
+    },
+    "next_comp": 5,
+    "next_wire": 9
+  },
+  "program": {
+    "rules": []
+  }
+}

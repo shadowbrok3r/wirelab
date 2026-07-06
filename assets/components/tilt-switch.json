@@ -1,0 +1,23 @@
+{
+  "id": "tilt-switch",
+  "name": "Tilt Switch",
+  "category": "Input",
+  "description": "Tilt ball switch (SW-520D style): a metal ball closes the contacts when the tube tips past roughly 15 degrees. Wire one lead to a GPIO and the other to GND; the pin uses an internal pull-up, so the GPIO reads low while tilted.",
+  "terminals": [
+    { "id": "a", "name": "Lead A", "role": "a" },
+    { "id": "b", "name": "Lead B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "generic",
+    "color": [185, 155, 95],
+    "width_mm": 5.0,
+    "height_mm": 11.0
+  },
+  "sim": { "kind": "push_button" },
+  "actions": [],
+  "events": [
+    { "id": "pressed", "name": "Tilted (closed)" },
+    { "id": "released", "name": "Level (open)" },
+    { "id": "changed", "name": "Changed" }
+  ]
+}

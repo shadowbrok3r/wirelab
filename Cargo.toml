@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wirelab-proto",
+    "crates/wirelab-core",
+    "crates/wirelab-link",
+    "crates/wirelab-gui",
+]
+exclude = ["firmware/wirelab-fw", "lsp"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+wirelab-proto = { path = "crates/wirelab-proto", features = ["std"] }
+wirelab-core = { path = "crates/wirelab-core" }
+wirelab-link = { path = "crates/wirelab-link" }
+
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+postcard = { version = "1.1.3", default-features = false }
+heapless = { version = "0.9.3", features = ["serde"] }
+cobs = { version = "0.5.1", default-features = false }
+crc = "3.4.0"
+bitflags = { version = "2.13.0", features = ["serde"] }
+rhai = "1.25.1"
+# Vendored rhai-lsp workspace (lsp/): parser + semantic model for live lints.
+rhai-rowan = { path = "lsp/crates/rhai-rowan" }
+rhai-hir = { path = "lsp/crates/rhai-hir" }
+url = "2.5.7"
+thiserror = "2.0.18"
+anyhow = "1.0.103"
+log = "0.4.33"
+env_logger = "0.11.11"
+crossbeam-channel = "0.5.15"
+serialport = { version = "4.9.0", default-features = false }
+egui = { version = "0.35.0", features = ["serde"] }
+eframe = { version = "0.35.0", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "persistence",
+    "wayland",
+    "x11",
+] }
+egui_extras = { version = "0.35.0", features = ["serde"] }
+egui-phosphor = "0.12.0"
+egui-snarl = { version = "0.11.0", features = ["serde"] }
+rfd = "0.17.2"
+ureq = { version = "3.3.0", features = ["json"] }
+rmcp = { version = "2.1.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+axum = "0.8"
+schemars = "1"
+directories = "6.0.0"
+
+[patch.crates-io]
+# egui 0.35-compatible phosphor icons (upstream lags behind egui releases).
+egui-phosphor = { git = "https://github.com/shadowbrok3r/egui-phosphor", branch = "egui-035" }
+
+[profile.release]
+lto = "thin"
+strip = true

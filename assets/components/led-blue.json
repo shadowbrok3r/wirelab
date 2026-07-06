@@ -1,0 +1,44 @@
+{
+  "id": "led-blue",
+  "name": "Blue LED",
+  "category": "Output",
+  "description": "5mm blue LED with a higher forward voltage than red or green parts. Wire the anode toward the driving GPIO through a series resistor and the cathode toward GND.",
+  "terminals": [
+    { "id": "anode", "name": "Anode (+)", "role": "anode" },
+    { "id": "cathode", "name": "Cathode (-)", "role": "cathode" }
+  ],
+  "visual": {
+    "shape": "led",
+    "color": [70, 120, 255],
+    "width_mm": 6.0,
+    "height_mm": 8.0
+  },
+  "sim": { "kind": "led", "forward_mv": 2800 },
+  "actions": [
+    { "id": "on", "name": "Turn on" },
+    { "id": "off", "name": "Turn off" },
+    { "id": "toggle", "name": "Toggle" },
+    {
+      "id": "blink",
+      "name": "Blink",
+      "params": [
+        { "key": "period_ms", "name": "Period (ms)", "min": 40, "max": 5000, "default": 500 }
+      ]
+    },
+    {
+      "id": "breathe",
+      "name": "Breathe",
+      "params": [
+        { "key": "period_ms", "name": "Period (ms)", "min": 200, "max": 10000, "default": 2000 }
+      ]
+    },
+    {
+      "id": "dim",
+      "name": "Dim",
+      "params": [
+        { "key": "percent", "name": "Brightness %", "min": 0, "max": 100, "default": 50 }
+      ]
+    }
+  ],
+  "events": []
+}

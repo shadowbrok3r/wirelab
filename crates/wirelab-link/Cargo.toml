@@ -1,0 +1,14 @@
+[package]
+name = "wirelab-link"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Host-side device transports for WireLab: serial hardware link and in-process simulator"
+
+[dependencies]
+wirelab-proto = { workspace = true }
+wirelab-core = { workspace = true }
+serialport = { workspace = true }
+crossbeam-channel = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

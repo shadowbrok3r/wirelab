@@ -1,0 +1,19 @@
+{
+  "id": "photoresistor-ldr",
+  "name": "Photoresistor (LDR)",
+  "category": "Analog",
+  "description": "Light-dependent resistor, about 200 kΩ in darkness falling to 2 kΩ in bright light. Pair it with a fixed resistor as a voltage divider between 3V3 and GND and read the midpoint on an ADC-capable GPIO.",
+  "terminals": [
+    { "id": "a", "name": "Leg A", "role": "a" },
+    { "id": "b", "name": "Leg B", "role": "b" }
+  ],
+  "visual": {
+    "shape": "photoresistor",
+    "color": [214, 160, 96],
+    "width_mm": 5.0,
+    "height_mm": 4.0
+  },
+  "sim": { "kind": "photoresistor", "dark_ohms": 200000, "bright_ohms": 2000 },
+  "actions": [],
+  "events": []
+}

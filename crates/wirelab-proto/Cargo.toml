@@ -1,0 +1,20 @@
+[package]
+name = "wirelab-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared host<->device wire protocol for WireLab (no_std)"
+
+[dependencies]
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+postcard = { workspace = true }
+heapless = { workspace = true }
+cobs = { workspace = true }
+crc = { workspace = true }
+
+[features]
+default = []
+std = ["serde/std", "postcard/use-std", "cobs/std"]
+
+[dev-dependencies]
+postcard = { version = "1.1.3", features = ["use-std"] }

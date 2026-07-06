@@ -1,0 +1,63 @@
+{
+  "id": "rfid-rc522",
+  "name": "RFID-RC522 (13.56 MHz)",
+  "category": "Input",
+  "description": "MFRC522 NFC/MIFARE reader on SPI: SDA is chip-select, plus SCK/MOSI/MISO, RST and optional IRQ. 3.3V only. SPI driving needs firmware support (planned) \u2014 wire and label it now, script it later.",
+  "terminals": [
+    {
+      "id": "vcc",
+      "name": "3.3V",
+      "role": "vcc"
+    },
+    {
+      "id": "rst",
+      "name": "RST",
+      "role": "a"
+    },
+    {
+      "id": "gnd",
+      "name": "GND",
+      "role": "gnd"
+    },
+    {
+      "id": "irq",
+      "name": "IRQ",
+      "role": "b"
+    },
+    {
+      "id": "miso",
+      "name": "MISO",
+      "role": "common"
+    },
+    {
+      "id": "mosi",
+      "name": "MOSI",
+      "role": "normally_open"
+    },
+    {
+      "id": "sck",
+      "name": "SCK",
+      "role": "normally_closed"
+    },
+    {
+      "id": "sda",
+      "name": "SDA (CS)",
+      "role": "signal"
+    }
+  ],
+  "visual": {
+    "shape": "chip",
+    "color": [
+      30,
+      60,
+      140
+    ],
+    "width_mm": 22.0,
+    "height_mm": 16.0
+  },
+  "sim": {
+    "kind": "generic"
+  },
+  "actions": [],
+  "events": []
+}

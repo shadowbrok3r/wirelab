@@ -1,0 +1,27 @@
+{
+  "id": "relay-module-1ch",
+  "name": "Relay Module (1 Channel)",
+  "category": "Output",
+  "description": "Single-channel opto-isolated relay board. Wire VCC to 5V, GND to GND and IN to a GPIO; the switched load connects across COM and NO (or NC).",
+  "terminals": [
+    { "id": "vcc", "name": "VCC", "role": "vcc" },
+    { "id": "gnd", "name": "GND", "role": "gnd" },
+    { "id": "signal", "name": "IN", "role": "signal" },
+    { "id": "common", "name": "COM", "role": "common" },
+    { "id": "normally_open", "name": "NO", "role": "normally_open" },
+    { "id": "normally_closed", "name": "NC", "role": "normally_closed" }
+  ],
+  "visual": {
+    "shape": "relay",
+    "color": [45, 90, 180],
+    "width_mm": 26.0,
+    "height_mm": 34.0
+  },
+  "sim": { "kind": "relay_module" },
+  "actions": [
+    { "id": "on", "name": "Energize" },
+    { "id": "off", "name": "Release" },
+    { "id": "toggle", "name": "Toggle" }
+  ],
+  "events": []
+}

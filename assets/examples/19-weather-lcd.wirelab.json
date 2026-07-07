@@ -1,0 +1,85 @@
+{
+ "name": "Weather on the LCD (http_get -> ST7735)",
+ "circuit": {
+  "board_id": "esp32-c5-devkitc-1",
+  "board_pos": [
+   0.0,
+   0.0
+  ],
+  "components": {
+   "1": {
+    "id": 1,
+    "def_id": "push-button",
+    "pos": [
+     45,
+     40
+    ],
+    "rotation": 0,
+    "label": "refresh",
+    "props": {},
+    "state": {
+     "kind": "button",
+     "pressed": false
+    },
+    "script": "// Live weather on the LCD. Scripts run on your computer, so http_get uses\n// the PC network -- the chip itself needs no Wi-Fi. Press the button (or\n// wait for the auto-fetch at start) to pull wttr.in and print it on the\n// ST7735; the reply lands in on_http(status, body).\n//\n// You are `refresh`; `screen` is the LCD, driven by lcd_init.\n\nfn fetch() {\n    http_get(\"https://wttr.in/?format=%t+%C\");     // e.g. \"+18C Partly cloudy\"\n}\n\nfn on_start() {\n    lcd_init(6, 7, 8, 9, 10);\n    lcd_clear(0, 6, 24);\n    lcd_rect(0, 0, 128, 15, 20, 60, 120);\n    lcd_text(6, 3, \"WEATHER\", 220, 235, 255);\n    lcd_text(8, 40, \"fetching...\", 150, 180, 220);\n    this.n = 0;\n    fetch();\n}\n\nfn on_press() {\n    lcd_rect(8, 36, 116, 50, 0, 6, 24);\n    lcd_text(8, 44, \"refreshing...\", 150, 180, 220);\n    fetch();\n}\n\nfn on_http(status, body) {\n    lcd_rect(8, 36, 116, 50, 0, 6, 24);\n    if status == 200 {\n        this.n += 1;\n        let line = body.trim();\n        lcd_text(8, 44, line, 255, 235, 150);\n        lcd_text(8, 66, `updated #${this.n}`, 120, 160, 200);\n        rgb(0, 30, 8);\n        log(`weather: ${line}`);\n    } else {\n        lcd_text(8, 44, \"fetch failed\", 255, 120, 120);\n        lcd_text(8, 66, `err ${status}`, 200, 120, 120);\n        rgb(40, 0, 0);\n        log(`http failed: ${status} ${body}`);\n    }\n}\n"
+   },
+   "2": {
+    "id": 2,
+    "def_id": "st7735-tft-128",
+    "pos": [
+     135,
+     60
+    ],
+    "rotation": 0,
+    "label": "screen",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   }
+  },
+  "wires": {
+   "1": {
+    "id": 1,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO0"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "a"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "2": {
+    "id": 2,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   }
+  },
+  "next_comp": 3,
+  "next_wire": 3
+ },
+ "program": {
+  "rules": []
+ }
+}

@@ -4,6 +4,7 @@ members = [
     "crates/wirelab-proto",
     "crates/wirelab-core",
     "crates/wirelab-link",
+    "crates/wirelab-flow-ui",
     "crates/wirelab-gui",
 ]
 exclude = ["firmware/wirelab-fw", "lsp"]
@@ -17,6 +18,7 @@ license = "MIT OR Apache-2.0"
 wirelab-proto = { path = "crates/wirelab-proto", features = ["std"] }
 wirelab-core = { path = "crates/wirelab-core" }
 wirelab-link = { path = "crates/wirelab-link" }
+wirelab-flow-ui = { path = "crates/wirelab-flow-ui" }
 
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

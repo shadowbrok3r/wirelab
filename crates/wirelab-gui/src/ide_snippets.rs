@@ -66,6 +66,11 @@ pub fn snippets_for(board: &BoardProfile) -> Vec<Snippet> {
             blurb: "talk to other board tabs in realtime",
             code: "fn on_press() {\n    send_board(\"garage\", \"open\");    // \"*\" broadcasts\n}\n\nfn on_board_msg(from, text) {\n    log(`${from} says ${text}`);\n}\n",
         },
+        Snippet {
+            title: "HTTP request",
+            blurb: "fetch a URL over the host's network",
+            code: "fn on_press() {\n    http_get(\"https://wttr.in/?format=3\");\n}\n\nfn on_http(status, body) {\n    if status == 200 {\n        log(body);\n    } else {\n        log(`http ${status}: ${body}`);   // status 0 = request failed\n    }\n}\n",
+        },
     ];
 
     if board.features.rgb_led_gpio.is_some() {

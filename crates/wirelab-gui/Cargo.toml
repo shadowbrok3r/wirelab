@@ -13,6 +13,7 @@ path = "src/main.rs"
 wirelab-proto = { workspace = true }
 wirelab-core = { workspace = true }
 wirelab-link = { workspace = true }
+wirelab-flow-ui = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true }
 egui_extras = { workspace = true }

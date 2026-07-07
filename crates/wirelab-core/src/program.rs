@@ -53,6 +53,8 @@ pub enum Action {
     I2cRead { addr: u8, reg: u16, len: u8 },
     /// Host-side routing to another board tab's scripts; never sent to a device.
     BoardMsg { to: String, text: String },
+    /// Host-side HTTP fetch; the reply arrives in on_http. Never sent to a device.
+    HttpGet { url: String },
 }
 
 /// Pack 8-bit RGB into the display's native RGB565.

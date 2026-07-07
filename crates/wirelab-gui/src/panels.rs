@@ -1263,6 +1263,7 @@ impl WireLabApp {
             Action::LcdRect { .. } => "lcd rect",
             Action::LcdText { .. } => "lcd text",
             Action::BoardMsg { .. } => "board msg",
+            Action::HttpGet { .. } => "http get",
         };
         ComboBox::from_id_salt(("act-kind", salt))
             .selected_text(kind_name)
@@ -1456,6 +1457,10 @@ impl WireLabApp {
                 ui.add(egui::TextEdit::singleline(to).desired_width(80.0));
                 ui.label("text");
                 ui.add(egui::TextEdit::singleline(text).desired_width(120.0));
+            }
+            Action::HttpGet { url } => {
+                ui.label("url");
+                ui.add(egui::TextEdit::singleline(url).desired_width(200.0));
             }
             Action::LcdInit { sck, mosi, cs, dc, rst, .. } => {
                 for (label, v) in

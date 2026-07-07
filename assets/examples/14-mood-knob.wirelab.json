@@ -1,0 +1,172 @@
+{
+ "name": "Mood knob (pot dims an LED + sweeps the RGB)",
+ "circuit": {
+  "board_id": "esp32-c5-devkitc-1",
+  "board_pos": [
+   0.0,
+   0.0
+  ],
+  "components": {
+   "1": {
+    "id": 1,
+    "def_id": "potentiometer-10k",
+    "pos": [
+     55,
+     45
+    ],
+    "rotation": 0,
+    "label": "knob",
+    "props": {},
+    "state": {
+     "kind": "fraction",
+     "value": 0.5
+    },
+    "script": "// Mood knob: one potentiometer drives both the on-board RGB LED (its\n// color) and a PWM-dimmed lamp LED (its brightness). Turn the knob by\n// dragging its slider in the sim; readings arrive in on_reading as\n// millivolts, 0..3300.\n//\n// You are `knob`; `lamp` is the blue LED wired beside you.\n\nfn on_start() {\n    log(\"turn the knob to set brightness + color\");\n}\n\nfn on_reading(mv) {\n    let pct = mv * 100 / 3300;          // 0..100 percent\n    lamp.dim(pct);                      // PWM brightness on the lamp LED\n\n    // Sweep the on-board RGB from green (low) through amber to red (high).\n    let r = mv * 255 / 3300;\n    let g = (3300 - mv) * 255 / 3300;\n    rgb(r, g, 0);\n}\n"
+   },
+   "2": {
+    "id": 2,
+    "def_id": "led-blue",
+    "pos": [
+     55,
+     12
+    ],
+    "rotation": 0,
+    "label": "lamp",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "3": {
+    "id": 3,
+    "def_id": "resistor-220",
+    "pos": [
+     38,
+     12
+    ],
+    "rotation": 0,
+    "label": "",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   }
+  },
+  "wires": {
+   "1": {
+    "id": 1,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "end_a"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "3V3"
+    },
+    "color": [
+     220,
+     60,
+     50
+    ],
+    "waypoints": []
+   },
+   "2": {
+    "id": 2,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "end_b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "3": {
+    "id": 3,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "wiper"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO1"
+    },
+    "color": [
+     190,
+     120,
+     255
+    ],
+    "waypoints": []
+   },
+   "4": {
+    "id": 4,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO10"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "a"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "5": {
+    "id": 5,
+    "a": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "anode"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "6": {
+    "id": 6,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "cathode"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND2"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   }
+  },
+  "next_comp": 4,
+  "next_wire": 7
+ },
+ "program": {
+  "rules": []
+ }
+}

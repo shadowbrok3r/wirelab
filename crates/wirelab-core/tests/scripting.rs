@@ -821,6 +821,32 @@ fn board_messaging_emits_and_receives() {
 }
 
 #[test]
+fn http_get_emits_action_and_on_http_dispatches() {
+    let lib = mini_lib();
+    let (mut circuit, _led, btn) = btn_led_circuit(&lib);
+    let (mut host, _engine) = host_for(
+        &mut circuit,
+        &lib,
+        btn,
+        "fn on_press() { http_get(\"http://example.com/x\"); http_get(\"   \"); }\n\
+         fn on_http(status, body) { log(`${status}: ${body}`); }",
+    );
+
+    // http_get queues a host-executed action; blank urls are ignored.
+    let actions = host.on_press(btn);
+    assert_eq!(
+        actions,
+        vec![Action::HttpGet { url: "http://example.com/x".into() }],
+        "{actions:?}"
+    );
+
+    // And the callback receives the reply.
+    host.on_http(btn, 200, "pong");
+    let logs = host.take_logs();
+    assert!(logs.iter().any(|l| l.contains("200: pong")), "{logs:?}");
+}
+
+#[test]
 fn flow_board_msg_gate_pattern_toggles_on_matching_text() {
     let lib = mini_lib();
     let (mut circuit, led, _btn) = btn_led_circuit(&lib);

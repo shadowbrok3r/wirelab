@@ -579,6 +579,8 @@ impl Engine {
                 }
                 // Routed host-side by the app before actions reach the engine.
                 Action::BoardMsg { .. } => {}
+                // Executed host-side by the app before actions reach the engine.
+                Action::HttpGet { .. } => {}
                 Action::LcdText { x, y, rgb, text } => {
                     let mut t = text.as_str();
                     if t.len() > 32 {

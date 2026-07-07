@@ -6,6 +6,7 @@ mod canvas;
 mod draw;
 mod flash;
 mod flow_ui;
+mod http_fetch;
 mod ide;
 mod ide_snippets;
 mod live;

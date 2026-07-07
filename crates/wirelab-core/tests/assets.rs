@@ -56,48 +56,205 @@ fn examples_load_and_run() {
             wirelab_core::project::Project::load(&path).unwrap_or_else(|e| {
                 panic!("{} does not parse: {e}", path.display());
             });
-        let board = lib
-            .board(&project.circuit.board_id)
-            .unwrap_or_else(|| panic!("{}: unknown board", path.display()));
-        for comp in project.circuit.components.values() {
-            assert!(
-                lib.component(&comp.def_id).is_some(),
-                "{}: unknown component {}",
-                path.display(),
-                comp.def_id
-            );
-        }
-        let nl = wirelab_core::netlist::Netlist::build(&project.circuit, board, &lib);
-        let lints =
-            wirelab_core::validate::validate(&project.circuit, board, &lib, &nl);
-        let errors: Vec<_> = lints
-            .iter()
-            .filter(|l| matches!(l.severity, wirelab_core::validate::Severity::Error))
-            .collect();
-        assert!(errors.is_empty(), "{}: {errors:?}", path.display());
+        for tab in &project.boards {
+            let board = lib
+                .board(&tab.circuit.board_id)
+                .unwrap_or_else(|| panic!("{}: unknown board", path.display()));
+            for comp in tab.circuit.components.values() {
+                assert!(
+                    lib.component(&comp.def_id).is_some(),
+                    "{}: unknown component {}",
+                    path.display(),
+                    comp.def_id
+                );
+            }
+            let nl = wirelab_core::netlist::Netlist::build(&tab.circuit, board, &lib);
+            let lints = wirelab_core::validate::validate(&tab.circuit, board, &lib, &nl);
+            let errors: Vec<_> = lints
+                .iter()
+                .filter(|l| matches!(l.severity, wirelab_core::validate::Severity::Error))
+                .collect();
+            assert!(errors.is_empty(), "{}: {errors:?}", path.display());
 
-        let mut host = wirelab_core::script::ScriptHost::new();
-        host.set_board(board.chip.name(), &board.specs, board.features.rgb_led_gpio);
-        host.sync(&project.circuit, &lib);
-        if !project.flow.nodes.is_empty() {
-            let code = wirelab_core::flow::compile(&project.flow).unwrap_or_else(|e| {
-                panic!("{}: flow does not compile: {e:?}", path.display());
-            });
+            let mut host = wirelab_core::script::ScriptHost::new();
+            host.set_board(board.chip.name(), &board.specs, board.features.rgb_led_gpio);
+            host.sync(&tab.circuit, &lib);
+            if !tab.flow.nodes.is_empty() {
+                let code = wirelab_core::flow::compile(&tab.flow).unwrap_or_else(|e| {
+                    panic!("{}: flow does not compile: {e:?}", path.display());
+                });
+                assert!(
+                    host.set_flow_script(Some(&code)),
+                    "{}: flow script rejected: {:?}",
+                    path.display(),
+                    host.errors
+                );
+            }
             assert!(
-                host.set_flow_script(Some(&code)),
-                "{}: flow script rejected: {:?}",
+                host.errors.is_empty(),
+                "{}: script errors {:?}",
                 path.display(),
                 host.errors
             );
         }
-        assert!(
-            host.errors.is_empty(),
-            "{}: script errors {:?}",
-            path.display(),
-            host.errors
-        );
     }
-    assert_eq!(n, 11, "expected the eleven shipped examples");
+    assert_eq!(n, 19, "expected the nineteen shipped examples");
+}
+
+/// The LCD messenger: a press on the C5 desk board sends a message to the
+/// Waveshare C6-LCD board, which prints it to the LCD and acks so the desk
+/// LED settles green.
+#[test]
+fn lcd_messenger_round_trip() {
+    use wirelab_core::program::Action;
+    use wirelab_core::script::ScriptHost;
+
+    let assets = assets_dir();
+    let lib = Library::load(&assets.join("boards"), &assets.join("components"))
+        .expect("assets parse");
+    let project = wirelab_core::project::Project::load(
+        &assets.join("examples/13-lcd-messenger.wirelab.json"),
+    )
+    .expect("example parses");
+    assert_eq!(project.boards.len(), 2);
+    let desk = &project.boards[0];
+    let display = &project.boards[1];
+
+    let host_for = |tab: &wirelab_core::project::BoardTab| {
+        let profile = lib.board(&tab.circuit.board_id).expect("board");
+        let mut h = ScriptHost::new();
+        h.set_board(profile.chip.name(), &profile.specs, profile.features.rgb_led_gpio);
+        h.sync(&tab.circuit, &lib);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        for c in h.scripted() {
+            h.on_start(c);
+        }
+        h
+    };
+    let mut h_desk = host_for(desk);
+    let mut h_display = host_for(display);
+
+    let btn = *desk.circuit.components.values().find(|c| c.label == "send_btn").map(|c| &c.id).unwrap();
+
+    // Press on the desk -> the first message addressed to "display", plus a
+    // confirming LED-on and buzzer beep.
+    let sent = h_desk.on_press(btn);
+    let text = sent.iter().find_map(|a| match a {
+        Action::BoardMsg { to, text } if to == "display" => Some(text.clone()),
+        _ => None,
+    });
+    assert_eq!(text.as_deref(), Some("hello!"));
+    assert!(
+        sent.iter().any(|a| matches!(a, Action::CompAction { action, .. } if action == "beep")),
+        "the send should chirp the buzzer: {sent:?}"
+    );
+
+    // Deliver it to the display (as the app router does): it paints the text
+    // to the LCD and acks the sender.
+    let mut shown = Vec::new();
+    for c in h_display.scripted() {
+        shown.extend(h_display.on_board_msg(c, "desk", "hello!"));
+    }
+    assert!(
+        shown.iter().any(|a| matches!(
+            a,
+            Action::LcdText { text, .. } if text == "hello!"
+        )),
+        "the message reaches the LCD: {shown:?}"
+    );
+    let ack = shown.iter().find_map(|a| match a {
+        Action::BoardMsg { to, text } if to == "desk" => Some(text.clone()),
+        _ => None,
+    });
+    assert_eq!(ack.as_deref(), Some("shown"));
+
+    // The ack lights the desk RGB green (SetRgb with g > 0).
+    let home = h_desk.on_board_msg(btn, "display", "shown");
+    assert!(
+        home.iter().any(|a| matches!(a, Action::SetRgb { g, .. } if *g > 0)),
+        "{home:?}"
+    );
+}
+
+/// The two-board example: the house button toggles the garage servo over
+/// send_board, and the garage acknowledges so the house LED stays truthful.
+#[test]
+fn house_and_garage_round_trip() {
+    use wirelab_core::program::Action;
+    use wirelab_core::script::ScriptHost;
+
+    let assets = assets_dir();
+    let lib = Library::load(&assets.join("boards"), &assets.join("components"))
+        .expect("assets parse");
+    let project = wirelab_core::project::Project::load(
+        &assets.join("examples/12-house-and-garage.wirelab.json"),
+    )
+    .expect("example parses");
+    assert_eq!(project.boards.len(), 2);
+    let house = &project.boards[0];
+    let garage = &project.boards[1];
+    let profile = lib.board(&house.circuit.board_id).expect("board");
+
+    let host_for = |circuit: &wirelab_core::circuit::Circuit| {
+        let mut h = ScriptHost::new();
+        h.set_board(profile.chip.name(), &profile.specs, profile.features.rgb_led_gpio);
+        h.sync(circuit, &lib);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        for c in h.scripted() {
+            h.on_start(c);
+        }
+        h
+    };
+    let mut h_house = host_for(&house.circuit);
+    let mut h_garage = host_for(&garage.circuit);
+
+    let btn = *house.circuit.components.values().find(|c| c.label == "door_btn").map(|c| &c.id).unwrap();
+    let door = *garage.circuit.components.values().find(|c| c.label == "door").map(|c| &c.id).unwrap();
+
+    // Press in the house → "toggle" addressed to the garage.
+    let sent = h_house.on_press(btn);
+    let toggle = sent.iter().find_map(|a| match a {
+        Action::BoardMsg { to, text } if to == "garage" => Some(text.clone()),
+        _ => None,
+    });
+    assert_eq!(toggle.as_deref(), Some("toggle"));
+
+    // Deliver to the garage (as the app router does): servo opens, ack sent.
+    let mut reply = Vec::new();
+    for c in h_garage.scripted() {
+        reply.extend(h_garage.on_board_msg(c, "house", "toggle"));
+    }
+    assert!(
+        reply.iter().any(|a| matches!(
+            a,
+            Action::CompAction { comp, action, params }
+                if *comp == door && action == "set_angle"
+                    && params.get("degrees").copied() == Some(90.0)
+        )),
+        "{reply:?}"
+    );
+    let ack = reply.iter().find_map(|a| match a {
+        Action::BoardMsg { to, text } if to == "house" => Some(text.clone()),
+        _ => None,
+    });
+    assert_eq!(ack.as_deref(), Some("opened"));
+
+    // The ack back home lights the RGB (green = SetRgb with g > 0).
+    let home = h_house.on_board_msg(btn, "garage", "opened");
+    assert!(
+        home.iter().any(|a| matches!(a, Action::SetRgb { g, .. } if *g > 0)),
+        "{home:?}"
+    );
+
+    // Second toggle closes it again.
+    let mut second = Vec::new();
+    for c in h_garage.scripted() {
+        second.extend(h_garage.on_board_msg(c, "house", "toggle"));
+    }
+    assert!(second.iter().any(|a| matches!(
+        a,
+        Action::BoardMsg { to, text } if to == "house" && text == "closed"
+    )));
 }
 
 /// The security-panel example: its FSM compiles and actually runs — a long

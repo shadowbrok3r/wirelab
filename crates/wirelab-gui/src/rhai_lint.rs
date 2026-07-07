@@ -30,6 +30,7 @@ pub const API_DOCS: &[ApiDoc] = &[
     ApiDoc { name: "uart", sig: "uart(tx, rx, baud)", doc: "Claim UART1 on any free pins (baud 0 releases it). Lines arrive via on_uart(line); the simulator echoes writes back.", member: false, args: true },
     ApiDoc { name: "uart_send", sig: "uart_send(text | [bytes])", doc: "Transmit on UART1.", member: false, args: true },
     ApiDoc { name: "send_board", sig: "send_board(board, text)", doc: "Send text to another board tab's scripts; they receive it in on_board_msg(from, text). Both boards must be connected.", member: false, args: true },
+    ApiDoc { name: "http_get", sig: "http_get(url)", doc: "Fetch a URL over the host's network (GET); the reply lands in on_http(status, body). Runs on the computer, not the chip.", member: false, args: true },
     ApiDoc { name: "spi_setup", sig: "spi_setup(sck, mosi, miso, freq_khz)", doc: "Generic SPI bus on SPI2 (replaces the LCD if configured). CS pins are plain GPIOs per transfer.", member: false, args: true },
     ApiDoc { name: "spi_xfer", sig: "spi_xfer(cs, [bytes])", doc: "Full-duplex transfer; the clocked-back bytes arrive in on_spi([bytes]). Sim echoes the written bytes.", member: false, args: true },
     ApiDoc { name: "i2c_setup", sig: "i2c_setup(sda, scl, freq_khz)", doc: "I2C master on any pins (typ. 100 or 400 kHz).", member: false, args: true },
@@ -79,6 +80,7 @@ pub const CALLBACK_DOCS: &[(&str, &str)] = &[
     ("on_spi", "An SPI transfer finished; argument is the [bytes] clocked back."),
     ("on_i2c", "An I2C read finished: (addr, [bytes])."),
     ("on_board_msg", "Text sent by another board tab via send_board: (from, text)."),
+    ("on_http", "An http_get finished: (status, body). Status 0 means the request failed and body holds the error."),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,6 +132,7 @@ impl Linter {
              fn uart(tx: int, rx: int, baud: int);\n\
              fn uart_send(data: ?);\n\
              fn send_board(board: ?, text: ?);\n\
+             fn http_get(url: ?);\n\
              fn spi_setup(sck: int, mosi: int, miso: int, freq_khz: int);\n\
              fn spi_xfer(cs: int, data: ?);\n\
              fn i2c_setup(sda: int, scl: int, freq_khz: int);\n\

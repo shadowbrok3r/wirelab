@@ -1,0 +1,291 @@
+{
+ "name": "Touch lamp (touch pad -> relay + LED)",
+ "circuit": {
+  "board_id": "esp32-c5-devkitc-1",
+  "board_pos": [
+   0.0,
+   0.0
+  ],
+  "components": {
+   "1": {
+    "id": 1,
+    "def_id": "touch-sensor-ttp223",
+    "pos": [
+     45,
+     40
+    ],
+    "rotation": 0,
+    "label": "touch",
+    "props": {},
+    "state": {
+     "kind": "toggle",
+     "on": false
+    },
+    "script": "// Touch lamp: tap the TTP223 pad to toggle a relay (the \"lamp\") and a\n// status LED. The toggle switch is a master enable -- taps do nothing\n// while it is off. A tap arrives as on_change(true) in the sim (use the\n// sensor's toggle in the inspector).\n//\n// You are `touch`; `lamp_relay`, `indicator` and `enable` are wired near.\n\nfn on_start() {\n    this.on = false;\n    indicator.off();\n    lamp_relay.off();\n    log(\"tap to toggle the lamp (flip `enable` on first)\");\n}\n\nfn on_change(active) {\n    if !active { return; }              // act on the touch, not the release\n    if !enable.is_on() {\n        log(\"disabled -- flip the enable switch\");\n        return;\n    }\n    this.on = !this.on;\n    if this.on {\n        lamp_relay.on();\n        indicator.on();\n        log(\"lamp ON\");\n    } else {\n        lamp_relay.off();\n        indicator.off();\n        log(\"lamp OFF\");\n    }\n}\n"
+   },
+   "2": {
+    "id": 2,
+    "def_id": "relay-module-1ch",
+    "pos": [
+     120,
+     45
+    ],
+    "rotation": 0,
+    "label": "lamp_relay",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "3": {
+    "id": 3,
+    "def_id": "led-green",
+    "pos": [
+     45,
+     12
+    ],
+    "rotation": 0,
+    "label": "indicator",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "4": {
+    "id": 4,
+    "def_id": "resistor-220",
+    "pos": [
+     30,
+     12
+    ],
+    "rotation": 0,
+    "label": "",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "5": {
+    "id": 5,
+    "def_id": "toggle-switch",
+    "pos": [
+     45,
+     95
+    ],
+    "rotation": 0,
+    "label": "enable",
+    "props": {},
+    "state": {
+     "kind": "toggle",
+     "on": false
+    }
+   }
+  },
+  "wires": {
+   "1": {
+    "id": 1,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "vcc"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "3V3"
+    },
+    "color": [
+     220,
+     60,
+     50
+    ],
+    "waypoints": []
+   },
+   "2": {
+    "id": 2,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "3": {
+    "id": 3,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "signal"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO0"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "4": {
+    "id": 4,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "vcc"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "3V3"
+    },
+    "color": [
+     220,
+     60,
+     50
+    ],
+    "waypoints": []
+   },
+   "5": {
+    "id": 5,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND2"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "6": {
+    "id": 6,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "signal"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO10"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "7": {
+    "id": 7,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO24"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "a"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "8": {
+    "id": 8,
+    "a": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "anode"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "9": {
+    "id": 9,
+    "a": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "cathode"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND3"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "10": {
+    "id": 10,
+    "a": {
+     "at": "terminal",
+     "comp": 5,
+     "terminal": "a"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO23"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "11": {
+    "id": 11,
+    "a": {
+     "at": "terminal",
+     "comp": 5,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND4"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   }
+  },
+  "next_comp": 6,
+  "next_wire": 12
+ },
+ "program": {
+  "rules": []
+ }
+}

@@ -1,0 +1,253 @@
+{
+ "name": "LCD messenger -- C5 texts a Waveshare C6-LCD (two boards)",
+ "active": 0,
+ "boards": [
+  {
+   "id": 1,
+   "name": "desk",
+   "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+     0.0,
+     0.0
+    ],
+    "components": {
+     "1": {
+      "id": 1,
+      "def_id": "push-button",
+      "pos": [
+       45,
+       40
+      ],
+      "rotation": 0,
+      "label": "send_btn",
+      "props": {},
+      "state": {
+       "kind": "button",
+       "pressed": false
+      },
+      "script": "// -- DESK ------------------------------------------------------------\n// A little desk buzzer that fires a message across to the Waveshare\n// ESP32-C6-LCD board. Each press cycles to the next canned message,\n// sends it to the board named \"display\", and the LED + buzzer confirm\n// it left the desk. Both boards must be connected -- switch tabs (or use\n// the IDE board picker) to watch the screen fill up.\n//\n// You are `send_btn`; `sent_led` and `buzzer` are wired beside you.\n\nfn on_start() {\n    this.msgs = [\"hello!\", \"coffee?\", \"on my way\", \"lunch @ 12\", \"ping\"];\n    this.i = -1;\n    rgb(0, 0, 20);\n    log(\"press to send a message to the LCD board\");\n}\n\nfn on_press() {\n    this.i = (this.i + 1) % this.msgs.len();\n    let text = this.msgs[this.i];\n    send_board(\"display\", text);        // \"*\" would broadcast to every board\n    log(`sent: ${text}`);\n\n    // Confirm the send: blip the LED and chirp the buzzer.\n    sent_led.on();\n    buzzer.beep(120);\n    after(150, || sent_led.off());\n}\n\nfn on_board_msg(from, text) {\n    if text == \"shown\" {                // the display acknowledged it\n        rgb(0, 40, 0);\n        after(400, || rgb(0, 0, 20));\n    }\n}\n"
+     },
+     "2": {
+      "id": 2,
+      "def_id": "buzzer-active",
+      "pos": [
+       110,
+       40
+      ],
+      "rotation": 0,
+      "label": "buzzer",
+      "props": {},
+      "state": {
+       "kind": "none"
+      }
+     },
+     "3": {
+      "id": 3,
+      "def_id": "led-red",
+      "pos": [
+       45,
+       12
+      ],
+      "rotation": 0,
+      "label": "sent_led",
+      "props": {},
+      "state": {
+       "kind": "none"
+      }
+     },
+     "4": {
+      "id": 4,
+      "def_id": "resistor-220",
+      "pos": [
+       30,
+       12
+      ],
+      "rotation": 0,
+      "label": "",
+      "props": {},
+      "state": {
+       "kind": "none"
+      }
+     }
+    },
+    "wires": {
+     "1": {
+      "id": 1,
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO9"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "a"
+      },
+      "color": [
+       86,
+       156,
+       255
+      ],
+      "waypoints": []
+     },
+     "2": {
+      "id": 2,
+      "a": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "b"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     },
+     "3": {
+      "id": 3,
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO8"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 2,
+       "terminal": "signal"
+      },
+      "color": [
+       86,
+       156,
+       255
+      ],
+      "waypoints": []
+     },
+     "4": {
+      "id": 4,
+      "a": {
+       "at": "terminal",
+       "comp": 2,
+       "terminal": "gnd"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND2"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     },
+     "5": {
+      "id": 5,
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO10"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 4,
+       "terminal": "a"
+      },
+      "color": [
+       86,
+       156,
+       255
+      ],
+      "waypoints": []
+     },
+     "6": {
+      "id": 6,
+      "a": {
+       "at": "terminal",
+       "comp": 4,
+       "terminal": "b"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 3,
+       "terminal": "anode"
+      },
+      "color": [
+       86,
+       156,
+       255
+      ],
+      "waypoints": []
+     },
+     "7": {
+      "id": 7,
+      "a": {
+       "at": "terminal",
+       "comp": 3,
+       "terminal": "cathode"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND3"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     }
+    },
+    "next_comp": 5,
+    "next_wire": 8
+   },
+   "program": {
+    "rules": []
+   },
+   "flow": {
+    "nodes": [],
+    "wires": []
+   }
+  },
+  {
+   "id": 2,
+   "name": "display",
+   "circuit": {
+    "board_id": "esp32-c6-lcd-147",
+    "board_pos": [
+     0.0,
+     0.0
+    ],
+    "components": {
+     "1": {
+      "id": 1,
+      "def_id": "st7735-tft-128",
+      "pos": [
+       80,
+       40
+      ],
+      "rotation": 0,
+      "label": "screen",
+      "props": {},
+      "state": {
+       "kind": "none"
+      },
+      "script": "// -- DISPLAY ---------------------------------------------------------\n// The Waveshare ESP32-C6-LCD-1.47: a 172x320 ST7789 screen wired to the\n// chip on-board (MOSI 6, SCLK 7, CS 14, DC 15, RST 21) -- no jumpers, the\n// panel is soldered on. It receives messages from the \"desk\" board over\n// send_board, prints the latest one, keeps a running count and flashes\n// its RGB LED. The simulator renders the display on this component.\n\nfn repaint(count, from, text) {\n    lcd_clear(6, 8, 20);\n    lcd_rect(0, 0, 128, 16, 20, 40, 90);\n    lcd_text(6, 4, \"MESSAGES\", 235, 240, 255);\n    lcd_text(92, 4, `#${count}`, 180, 200, 255);\n    if text != \"\" {\n        lcd_rect(6, 30, 116, 22, 20, 24, 44);\n        lcd_text(10, 36, text, 255, 235, 120);\n        lcd_text(10, 60, `from ${from}`, 150, 170, 210);\n    } else {\n        lcd_text(10, 40, \"waiting...\", 120, 140, 170);\n    }\n}\n\nfn on_start() {\n    lcd_init(6, 7, 14, 15, 21);         // the Waveshare on-board mapping\n    this.count = 0;\n    repaint(0, \"\", \"\");\n    rgb(0, 8, 0);\n    log(`inbox ready on ${chip()}`);\n}\n\nfn on_board_msg(from, text) {\n    this.count += 1;\n    repaint(this.count, from, text);\n    rgb(0, 45, 10);                     // flash on receive\n    after(250, || rgb(0, 8, 0));\n    send_board(from, \"shown\");          // acknowledge the sender\n    log(`#${this.count} from ${from}: ${text}`);\n}\n"
+     }
+    },
+    "wires": {},
+    "next_comp": 2,
+    "next_wire": 1
+   },
+   "program": {
+    "rules": []
+   },
+   "flow": {
+    "nodes": [],
+    "wires": []
+   }
+  }
+ ]
+}

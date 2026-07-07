@@ -1,0 +1,175 @@
+{
+ "name": "House & garage \u2014 two boards talking (send_board)",
+ "active": 0,
+ "boards": [
+  {
+   "id": 1,
+   "name": "house",
+   "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+     0.0,
+     0.0
+    ],
+    "components": {
+     "1": {
+      "id": 1,
+      "def_id": "push-button",
+      "pos": [
+       40.0,
+       60.0
+      ],
+      "rotation": 0,
+      "label": "door_btn",
+      "props": {},
+      "state": {
+       "kind": "button",
+       "pressed": false
+      },
+      "script": "// \u2500\u2500 HOUSE \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n// One button, two boards. Pressing it messages the \"garage\" board tab \u2014\n// switch tabs (or the IDE's board picker) to see the other half.\n// Both boards must be connected (each tab keeps its session while parked).\n//\n// The garage answers with \"opened\"/\"closed\"; the RGB LED shows the state.\n\nfn on_start() {\n    rgb(0, 0, 25);\n    log(\"press the button to toggle the garage door\");\n}\n\nfn on_press() {\n    send_board(\"garage\", \"toggle\");   // \"*\" would broadcast instead\n}\n\nfn on_board_msg(from, text) {\n    if text == \"opened\" {\n        rgb(0, 60, 0);\n        log(`${from}: door is open`);\n    } else if text == \"closed\" {\n        rgb(60, 0, 0);\n        log(`${from}: door is closed`);\n    }\n}\n"
+     }
+    },
+    "wires": {
+     "1": {
+      "id": 1,
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO4"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "a"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     },
+     "2": {
+      "id": 2,
+      "a": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "b"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     }
+    },
+    "next_comp": 2,
+    "next_wire": 3
+   },
+   "program": {
+    "rules": []
+   },
+   "flow": {
+    "nodes": [],
+    "wires": []
+   }
+  },
+  {
+   "id": 2,
+   "name": "garage",
+   "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+     0.0,
+     0.0
+    ],
+    "components": {
+     "1": {
+      "id": 1,
+      "def_id": "servo-sg90",
+      "pos": [
+       60.0,
+       60.0
+      ],
+      "rotation": 0,
+      "label": "door",
+      "props": {},
+      "state": {
+       "kind": "none"
+      },
+      "script": "// \u2500\u2500 GARAGE \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n// The other half of the pair: the house's button drives this servo door,\n// and every move is acknowledged back so the house LED stays truthful.\n\nfn on_start() {\n    this.open = false;\n    door.set_angle(0);\n}\n\nfn on_board_msg(from, text) {\n    if text != \"toggle\" { return; }\n    this.open = !this.open;\n    if this.open {\n        door.set_angle(90);\n        send_board(from, \"opened\");\n    } else {\n        door.set_angle(0);\n        send_board(from, \"closed\");\n    }\n    log(`door ${if this.open { \"opened\" } else { \"closed\" }} (by ${from})`);\n}\n"
+     }
+    },
+    "wires": {
+     "1": {
+      "id": 1,
+      "a": {
+       "at": "board_pin",
+       "key": "5V"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "vcc"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     },
+     "2": {
+      "id": 2,
+      "a": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "gnd"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     },
+     "3": {
+      "id": 3,
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO2"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "signal"
+      },
+      "color": [
+       40,
+       40,
+       40
+      ],
+      "waypoints": []
+     }
+    },
+    "next_comp": 2,
+    "next_wire": 4
+   },
+   "program": {
+    "rules": []
+   },
+   "flow": {
+    "nodes": [],
+    "wires": []
+   }
+  }
+ ]
+}

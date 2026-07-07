@@ -4976,6 +4976,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wirelab-flow-ui"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "egui-snarl",
+ "wirelab-core",
+]
+
+[[package]]
 name = "wirelab-gui"
 version = "0.1.0"
 dependencies = [
@@ -5000,6 +5009,7 @@ dependencies = [
  "ureq",
  "url",
  "wirelab-core",
+ "wirelab-flow-ui",
  "wirelab-link",
  "wirelab-proto",
 ]

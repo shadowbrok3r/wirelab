@@ -537,6 +537,14 @@ impl ScriptHost {
             });
         });
         let sh = shared.clone();
+        engine.register_fn("http_get", move |url: &str| {
+            let url = url.trim();
+            if url.is_empty() {
+                return;
+            }
+            sh.fx.borrow_mut().actions.push(Action::HttpGet { url: url.to_string() });
+        });
+        let sh = shared.clone();
         engine.register_fn("after", move |ms: i64, f: FnPtr| {
             let comp = *sh.current.borrow();
             let mut timers = sh.timers.borrow_mut();
@@ -787,6 +795,15 @@ impl ScriptHost {
             comp,
             "on_board_msg",
             vec![Dynamic::from(from.to_string()), Dynamic::from(text.to_string())],
+        )
+    }
+
+    /// An http_get finished; status 0 carries the transport error as body.
+    pub fn on_http(&mut self, comp: CompId, status: i64, body: &str) -> Vec<Action> {
+        self.call(
+            comp,
+            "on_http",
+            vec![Dynamic::from(status), Dynamic::from(body.to_string())],
         )
     }
 

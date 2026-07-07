@@ -47,6 +47,130 @@ pub enum Cmd {
     OpenExample { name: String },
     GetFlow,
     SetFlow { nodes: Value, wires: Value },
+    /// Full project snapshot + the board profiles / component defs it uses,
+    /// served to remote viewers (the iPad plugin) over the LAN listener.
+    GetProjectSnapshot,
+    /// Remote flow edit: applies when `base` matches the board's current
+    /// flow hash (a stale base means the desktop changed — 'conflict').
+    SetBoardFlow { board_id: u64, base: u64, nodes: Value, wires: Value },
+    /// Remote component drags; positions are last-writer-wins.
+    MoveComponents { board_id: u64, moves: Vec<(u32, [f32; 2])> },
+    /// Remote structural edit (add/remove component/wire) on any board.
+    EditBoard { board_id: u64, op: EditOp },
+}
+
+/// One remote structural edit, board-addressed. Endpoints use the same
+/// serde shape as project files: `{"at":"board_pin","key":"GPIO2"}` /
+/// `{"at":"terminal","comp":1,"terminal":"anode"}`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum EditOp {
+    AddComp {
+        def_id: String,
+        pos: [f32; 2],
+        #[serde(default)]
+        label: String,
+    },
+    RemoveComp { comp: u32 },
+    AddWire { a: wirelab_core::circuit::Endpoint, b: wirelab_core::circuit::Endpoint },
+    RemoveWire { wire: u32 },
+}
+
+/// Parse a remote structural-edit body: `{board_id, op, ...}`.
+pub fn parse_edit_push(body: &str) -> Result<Cmd, String> {
+    let v: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let board_id = v.get("board_id").and_then(Value::as_u64).ok_or("missing board_id")?;
+    let op: EditOp = serde_json::from_value(v).map_err(|e| format!("bad edit: {e}"))?;
+    Ok(Cmd::EditBoard { board_id, op })
+}
+
+/// Parse a remote flow-edit body: `{board_id, base, nodes, wires}`.
+pub fn parse_flow_push(body: &str) -> Result<Cmd, String> {
+    let v: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    Ok(Cmd::SetBoardFlow {
+        board_id: v.get("board_id").and_then(Value::as_u64).ok_or("missing board_id")?,
+        base: v.get("base").and_then(Value::as_u64).ok_or("missing base")?,
+        nodes: v.get("nodes").cloned().ok_or("missing nodes")?,
+        wires: v.get("wires").cloned().ok_or("missing wires")?,
+    })
+}
+
+/// Parse a remote drag body: `{board_id, moves: [[comp, [x, y]], ...]}`.
+pub fn parse_move_push(body: &str) -> Result<Cmd, String> {
+    let v: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let board_id = v.get("board_id").and_then(Value::as_u64).ok_or("missing board_id")?;
+    let moves: Vec<(u32, [f32; 2])> =
+        serde_json::from_value(v.get("moves").cloned().ok_or("missing moves")?)
+            .map_err(|e| format!("bad moves: {e}"))?;
+    Ok(Cmd::MoveComponents { board_id, moves })
+}
+
+/// Apply one structural edit to a circuit, with the same electrical-safety
+/// verdict the desktop and MCP enforce.
+fn apply_edit(
+    circuit: &mut wirelab_core::circuit::Circuit,
+    lib: &wirelab_core::library::Library,
+    live_output_gpios: &[u8],
+    op: EditOp,
+) -> Result<Value, String> {
+    use wirelab_core::circuit::{CompId, PlacedComponent, WireId};
+    use wirelab_core::component::CompState;
+    use wirelab_core::netlist::{Netlist, WireVerdict, wire_verdict};
+    match op {
+        EditOp::AddComp { def_id, pos, label } => {
+            let def = lib
+                .component(&def_id)
+                .ok_or_else(|| format!("unknown component '{def_id}'"))?
+                .clone();
+            let id = circuit.add_component(PlacedComponent {
+                id: CompId(0),
+                def_id,
+                pos: [pos[0].round(), pos[1].round()],
+                rotation: 0,
+                label,
+                props: Default::default(),
+                state: CompState::initial(&def.sim),
+                script: None,
+            });
+            Ok(serde_json::json!({ "ok": true, "comp": id.0 }))
+        }
+        EditOp::RemoveComp { comp } => {
+            let id = CompId(comp);
+            if !circuit.components.contains_key(&id) {
+                return Err(format!("no component {comp}"));
+            }
+            circuit.remove_component(id);
+            Ok(serde_json::json!({ "ok": true, "removed": comp }))
+        }
+        EditOp::AddWire { a, b } => {
+            let board = lib.board(&circuit.board_id).ok_or("no board profile")?;
+            let nl = Netlist::build(circuit, board, lib);
+            match wire_verdict(&nl, board, &a, &b, live_output_gpios) {
+                WireVerdict::Blocked(why) => Err(format!("refused: {why}")),
+                WireVerdict::Redundant => Err("those points are already connected".into()),
+                WireVerdict::Ok => {
+                    let id = circuit.add_wire(a, b, [190, 120, 255]);
+                    Ok(serde_json::json!({ "ok": true, "wire": id.0 }))
+                }
+            }
+        }
+        EditOp::RemoveWire { wire } => {
+            let id = WireId(wire);
+            if !circuit.wires.contains_key(&id) {
+                return Err(format!("no wire {wire}"));
+            }
+            circuit.remove_wire(id);
+            Ok(serde_json::json!({ "ok": true, "removed": wire }))
+        }
+    }
+}
+
+/// Content hash used as the optimistic-concurrency base for remote flow edits.
+pub fn flow_hash(flow: &wirelab_core::flow::FlowGraph) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    serde_json::to_string(flow).unwrap_or_default().hash(&mut h);
+    h.finish()
 }
 
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
@@ -96,6 +220,7 @@ impl McpServer {
                     let mut config = StreamableHttpServerConfig::default();
                     config.stateful_mode = false;
                     config.json_response = true;
+                    let (view_tx, view_ctx) = (tx.clone(), ctx.clone());
                     let service = StreamableHttpService::new(
                         move || Ok(WirelabTools::new(tx.clone(), ctx.clone())),
                         Arc::new(LocalSessionManager::default()),
@@ -110,6 +235,87 @@ impl McpServer {
                                 return;
                             }
                         };
+
+                    // Project snapshot + remote-edit endpoints for LAN viewers
+                    // (the iPad plugin) — unlike the localhost-only MCP.
+                    let ask_ui = {
+                        let tx = view_tx.clone();
+                        let ctx = view_ctx.clone();
+                        move |cmd: Cmd| {
+                            let tx = tx.clone();
+                            let ctx = ctx.clone();
+                            async move {
+                                let (reply, rx) = tokio::sync::oneshot::channel();
+                                if tx.send(McpRequest { cmd, reply }).is_err() {
+                                    return r#"{"ok":false,"error":"WireLab is shutting down"}"#
+                                        .to_string();
+                                }
+                                ctx.request_repaint();
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_secs(5),
+                                    rx,
+                                )
+                                .await
+                                {
+                                    Ok(Ok(Ok(v))) => serde_json::to_string(&v).unwrap_or_default(),
+                                    Ok(Ok(Err(e))) => serde_json::json!({
+                                        "ok": false, "error": e
+                                    })
+                                    .to_string(),
+                                    _ => r#"{"ok":false,"error":"the WireLab UI did not respond"}"#
+                                        .to_string(),
+                                }
+                            }
+                        }
+                    };
+                    let get_ask = ask_ui.clone();
+                    let flow_ask = ask_ui.clone();
+                    let edit_ask = ask_ui.clone();
+                    let move_ask = ask_ui;
+                    let view_router = axum::Router::new()
+                        .route(
+                            "/project",
+                            axum::routing::get(move || get_ask(Cmd::GetProjectSnapshot)),
+                        )
+                        .route(
+                            "/project/flow",
+                            axum::routing::post(move |body: String| async move {
+                                match parse_flow_push(&body) {
+                                    Ok(cmd) => flow_ask(cmd).await,
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e })
+                                        .to_string(),
+                                }
+                            }),
+                        )
+                        .route(
+                            "/project/edit",
+                            axum::routing::post(move |body: String| async move {
+                                match parse_edit_push(&body) {
+                                    Ok(cmd) => edit_ask(cmd).await,
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e })
+                                        .to_string(),
+                                }
+                            }),
+                        )
+                        .route(
+                            "/project/positions",
+                            axum::routing::post(move |body: String| async move {
+                                match parse_move_push(&body) {
+                                    Ok(cmd) => move_ask(cmd).await,
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e })
+                                        .to_string(),
+                                }
+                            }),
+                        );
+                    let view_port = port + 3;
+                    if let Ok(l) =
+                        tokio::net::TcpListener::bind(("0.0.0.0", view_port)).await
+                    {
+                        tokio::spawn(async move {
+                            let _ = axum::serve(l, view_router).await;
+                        });
+                    }
+
                     let _ = ready_tx.send(Ok(()));
                     let _ = axum::serve(listener, router)
                         .with_graceful_shutdown(async {
@@ -804,6 +1010,126 @@ impl WireLabApp {
                     )),
                 }
             }
+            Cmd::GetProjectSnapshot => {
+                self.project.sync_active();
+                let mut profiles = serde_json::Map::new();
+                let mut defs = serde_json::Map::new();
+                for tab in &self.project.boards {
+                    if let Some(b) = self.lib.board(&tab.circuit.board_id)
+                        && !profiles.contains_key(&tab.circuit.board_id)
+                        && let Ok(v) = serde_json::to_value(b)
+                    {
+                        profiles.insert(tab.circuit.board_id.clone(), v);
+                    }
+                }
+                // The full library rides along: it's the iPad's palette.
+                for (id, d) in &self.lib.components {
+                    if let Ok(v) = serde_json::to_value(d) {
+                        defs.insert(id.clone(), v);
+                    }
+                }
+                let flow_bases: serde_json::Map<String, Value> = self
+                    .project
+                    .boards
+                    .iter()
+                    .map(|b| (b.id.to_string(), Value::from(flow_hash(&b.flow))))
+                    .collect();
+                Ok(serde_json::json!({
+                    "name": self.project.name,
+                    "active": self.project.active,
+                    "boards": self.project.boards,
+                    "profiles": profiles,
+                    "defs": defs,
+                    "flow_bases": flow_bases,
+                }))
+            }
+            Cmd::SetBoardFlow { board_id, base, nodes, wires } => {
+                self.project.sync_active();
+                let Some(idx) = self.project.boards.iter().position(|b| b.id == board_id)
+                else {
+                    return Err("no such board".into());
+                };
+                if flow_hash(&self.project.boards[idx].flow) != base {
+                    return Err("conflict: the flow changed on the desktop".into());
+                }
+                let graph: wirelab_core::flow::FlowGraph =
+                    serde_json::from_value(serde_json::json!({ "nodes": nodes, "wires": wires }))
+                        .map_err(|e| format!("bad flow: {e}"))?;
+                let new_base = flow_hash(&graph);
+                self.project.boards[idx].flow = graph.clone();
+                if idx == self.project.active {
+                    self.project.flow = graph;
+                    self.flow_rev += 1;
+                } else if let Some(bb) = self.background.get_mut(&board_id) {
+                    // A live parked board picks the edit up immediately.
+                    bb.set_flow(&graph);
+                }
+                self.console.push(format!(
+                    "[{}] flow updated from a remote editor",
+                    self.project.boards[idx].name
+                ));
+                Ok(serde_json::json!({ "ok": true, "base": new_base }))
+            }
+            Cmd::EditBoard { board_id, op } => {
+                self.project.sync_active();
+                let Some(idx) = self.project.boards.iter().position(|b| b.id == board_id)
+                else {
+                    return Err("no such board".into());
+                };
+                let name = self.project.boards[idx].name.clone();
+                let result = if idx == self.project.active {
+                    let outs: Vec<u8> =
+                        self.cache.bindings.outputs.values().map(|o| o.gpio).collect();
+                    // Working copy is authoritative for the active board; it
+                    // folds into boards[active] at the next sync_active.
+                    let lib = self.lib.clone();
+                    let r = apply_edit(&mut self.project.circuit, &lib, &outs, op)?;
+                    self.topo_rev += 1;
+                    self.state_rev += 1;
+                    r
+                } else {
+                    let outs: Vec<u8> = self
+                        .background
+                        .get(&board_id)
+                        .map(|bb| bb.output_gpios())
+                        .unwrap_or_default();
+                    let lib = self.lib.clone();
+                    let circuit = &mut self.project.boards[idx].circuit;
+                    let r = apply_edit(circuit, &lib, &outs, op)?;
+                    // A live parked board re-plans its pin setup immediately.
+                    let circuit = self.project.boards[idx].circuit.clone();
+                    if let Some(bb) = self.background.get_mut(&board_id) {
+                        bb.set_topo(&circuit, &self.lib);
+                    }
+                    r
+                };
+                self.console.push(format!("[{name}] circuit edited from a remote editor"));
+                Ok(result)
+            }
+            Cmd::MoveComponents { board_id, moves } => {
+                self.project.sync_active();
+                let Some(idx) = self.project.boards.iter().position(|b| b.id == board_id)
+                else {
+                    return Err("no such board".into());
+                };
+                let mut n = 0;
+                for (comp, pos) in moves {
+                    let id = wirelab_core::circuit::CompId(comp);
+                    if idx == self.project.active
+                        && let Some(c) = self.project.circuit.components.get_mut(&id)
+                    {
+                        c.pos = pos;
+                        n += 1;
+                    }
+                    if let Some(c) = self.project.boards[idx].circuit.components.get_mut(&id) {
+                        c.pos = pos;
+                        if idx != self.project.active {
+                            n += 1;
+                        }
+                    }
+                }
+                Ok(serde_json::json!({ "ok": true, "moved": n }))
+            }
             Cmd::GetFlow => {
                 let graph = serde_json::to_value(&self.project.flow).map_err(|e| e.to_string())?;
                 let (code, errors) = match wirelab_core::flow::compile(&self.project.flow) {
@@ -866,6 +1192,69 @@ mod tests {
         assert_eq!(g.nodes[1].pos, [260.0, 40.0]);
         assert_eq!(g.nodes[2].pos, [40.0, 150.0]);
         assert_eq!(g.nodes[3].pos, [7.0, 9.0]);
+    }
+
+    #[test]
+    fn push_bodies_parse_and_hash_is_stable() {
+        let cmd = parse_flow_push(
+            r#"{"board_id":2,"base":7,"nodes":[{"kind":{"t":"Toggle"},"pos":[1.0,2.0]}],"wires":[]}"#,
+        )
+        .unwrap();
+        assert!(matches!(cmd, Cmd::SetBoardFlow { board_id: 2, base: 7, .. }));
+        let cmd = parse_move_push(r#"{"board_id":1,"moves":[[3,[10.0,20.0]]]}"#).unwrap();
+        match cmd {
+            Cmd::EditBoard { board_id, op } => {
+                self.project.sync_active();
+                let Some(idx) = self.project.boards.iter().position(|b| b.id == board_id)
+                else {
+                    return Err("no such board".into());
+                };
+                let name = self.project.boards[idx].name.clone();
+                let result = if idx == self.project.active {
+                    let outs: Vec<u8> =
+                        self.cache.bindings.outputs.values().map(|o| o.gpio).collect();
+                    // Working copy is authoritative for the active board; it
+                    // folds into boards[active] at the next sync_active.
+                    let lib = self.lib.clone();
+                    let r = apply_edit(&mut self.project.circuit, &lib, &outs, op)?;
+                    self.topo_rev += 1;
+                    self.state_rev += 1;
+                    r
+                } else {
+                    let outs: Vec<u8> = self
+                        .background
+                        .get(&board_id)
+                        .map(|bb| bb.output_gpios())
+                        .unwrap_or_default();
+                    let lib = self.lib.clone();
+                    let circuit = &mut self.project.boards[idx].circuit;
+                    let r = apply_edit(circuit, &lib, &outs, op)?;
+                    // A live parked board re-plans its pin setup immediately.
+                    let circuit = self.project.boards[idx].circuit.clone();
+                    if let Some(bb) = self.background.get_mut(&board_id) {
+                        bb.set_topo(&circuit, &self.lib);
+                    }
+                    r
+                };
+                self.console.push(format!("[{name}] circuit edited from a remote editor"));
+                Ok(result)
+            }
+            Cmd::MoveComponents { board_id, moves } => {
+                assert_eq!(board_id, 1);
+                assert_eq!(moves, vec![(3, [10.0, 20.0])]);
+            }
+            _ => panic!(),
+        }
+        assert!(parse_flow_push("{}").is_err());
+
+        let mut g = wirelab_core::flow::FlowGraph::default();
+        let h0 = flow_hash(&g);
+        assert_eq!(h0, flow_hash(&g), "hash is deterministic");
+        g.nodes.push(wirelab_core::flow::FlowNode {
+            kind: wirelab_core::flow::NodeKind::Toggle,
+            pos: [0.0, 0.0],
+        });
+        assert_ne!(h0, flow_hash(&g), "hash tracks content");
     }
 
     #[test]

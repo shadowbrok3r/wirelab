@@ -6,6 +6,7 @@ pub mod circuit;
 pub mod component;
 pub mod engine;
 pub mod flow;
+pub mod geometry;
 pub mod library;
 pub mod netlist;
 pub mod program;

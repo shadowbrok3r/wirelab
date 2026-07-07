@@ -1,0 +1,153 @@
+{
+ "name": "Plant monitor (soil sensor -> LCD gauge + buzzer)",
+ "circuit": {
+  "board_id": "esp32-c5-devkitc-1",
+  "board_pos": [
+   0.0,
+   0.0
+  ],
+  "components": {
+   "1": {
+    "id": 1,
+    "def_id": "soil-moisture-sensor",
+    "pos": [
+     45,
+     45
+    ],
+    "rotation": 0,
+    "label": "soil",
+    "props": {},
+    "state": {
+     "kind": "fraction",
+     "value": 0.5
+    },
+    "script": "// Plant monitor: a soil-moisture probe drives an LCD gauge, the on-board\n// RGB LED (green = wet, red = dry) and a chirp when the plant is thirsty.\n// Drag the soil sensor's level slider in the sim. Readings are millivolts;\n// a HIGHER voltage here means DRIER soil.\n//\n// You are `soil`; `screen` (LCD) and `chirp` (buzzer) are wired nearby.\n\nfn on_start() {\n    lcd_init(6, 7, 8, 9, 10);           // ST7735 on SPI2: sck, mosi, cs, dc, rst\n    lcd_clear(4, 10, 6);\n    lcd_rect(0, 0, 128, 15, 16, 40, 24);\n    lcd_text(6, 3, \"PLANT MONITOR\", 200, 235, 210);\n    this.dry = false;\n    this.last = -1;\n    log(\"watching soil moisture\");\n}\n\nfn on_reading(mv) {\n    let dryness = mv * 100 / 3300;      // 0 wet .. 100 dry\n    let wet = 100 - dryness;\n\n    // Repaint the gauge only when the whole-percent value moves.\n    if wet != this.last {\n        this.last = wet;\n        lcd_rect(8, 40, 112, 16, 20, 24, 20);           // gauge track\n        let fill = wet * 112 / 100;\n        lcd_rect(8, 40, fill, 16, 60, 200, 90);         // gauge fill\n        lcd_rect(8, 66, 120, 14, 4, 10, 6);\n        lcd_text(8, 68, `moisture ${wet}%`, 220, 235, 220);\n    }\n\n    // Color + alert, with a little hysteresis around the dry threshold.\n    rgb(dryness * 255 / 100, wet * 255 / 100, 0);\n    if wet < 25 && !this.dry {\n        this.dry = true;\n        chirp.tone(1200, 200);\n        log(\"thirsty! water me\");\n    } else if wet > 35 && this.dry {\n        this.dry = false;\n        log(\"happy again\");\n    }\n}\n"
+   },
+   "2": {
+    "id": 2,
+    "def_id": "st7735-tft-128",
+    "pos": [
+     135,
+     60
+    ],
+    "rotation": 0,
+    "label": "screen",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "3": {
+    "id": 3,
+    "def_id": "buzzer-passive",
+    "pos": [
+     45,
+     115
+    ],
+    "rotation": 0,
+    "label": "chirp",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   }
+  },
+  "wires": {
+   "1": {
+    "id": 1,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "vcc"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "3V3"
+    },
+    "color": [
+     220,
+     60,
+     50
+    ],
+    "waypoints": []
+   },
+   "2": {
+    "id": 2,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "3": {
+    "id": 3,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "signal"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO1"
+    },
+    "color": [
+     190,
+     120,
+     255
+    ],
+    "waypoints": []
+   },
+   "4": {
+    "id": 4,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO24"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "signal"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "5": {
+    "id": 5,
+    "a": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND2"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   }
+  },
+  "next_comp": 4,
+  "next_wire": 6
+ },
+ "program": {
+  "rules": []
+ }
+}

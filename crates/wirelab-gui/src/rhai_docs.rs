@@ -105,6 +105,15 @@ const SECTIONS: &[(&str, &str)] = &[
          detection so one script can adapt to different boards.",
     ),
     (
+        "Network requests",
+        "Scripts run host-side, so http_get uses the computer's network — the \
+         chip needs no Wi-Fi:\n```\nfn on_press() {\n    http_get(\"https://wttr.in/?format=3\");\n}\n\nfn on_http(status, body) {\n    if status == 200 {\n        log(body);\n    } else {\n        log(`http failed: ${status} ${body}`);\n    }\n}\n```\nReplies broadcast to every scripted component's on_http(status, body). \
+         Status 0 means the request itself failed (DNS, refused, timeout) and \
+         body holds the error text. Bodies are truncated to 64 KiB; up to 4 \
+         requests may be in flight at once (extras are dropped with a console \
+         note) and each times out after 15 s.",
+    ),
+    (
         "Rhai: variables & types",
         "```\nlet x = 42;            // int (i64)\nlet y = 1.5;           // float (f64)\nlet s = \"text\";        // string\nlet ok = true;         // bool\nlet a = [1, 2, 3];     // array\nlet m = #{ a: 1 };     // object map\nconst LIMIT = 2000;    // constant\n```\nIntegers and floats do not mix implicitly: `1 + 1.5` is an error — write \
          `1.0 + 1.5` or `x.to_float()`. Missing map properties read as `()` \

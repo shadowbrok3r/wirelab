@@ -57,6 +57,8 @@ pub struct LiveState {
     pub outbox: Vec<(String, String)>,
     /// Component scripts: always live while connected.
     pub scripts: ScriptHost,
+    /// Background http_get requests; replies dispatch to on_http.
+    http: crate::http_fetch::HttpPool,
     synced_scripts: u64,
     scripts_topo: u64,
     synced_flow: u64,
@@ -87,6 +89,7 @@ impl Default for LiveState {
             next_hello_ms: 0,
             outbox: Vec::new(),
             scripts: ScriptHost::new(),
+            http: crate::http_fetch::HttpPool::default(),
             synced_scripts: 0,
             scripts_topo: 0,
             synced_flow: 0,
@@ -203,6 +206,12 @@ impl LiveState {
         actions.retain(|a| match a {
             Action::BoardMsg { to, text } => {
                 self.outbox.push((to.clone(), text.clone()));
+                false
+            }
+            Action::HttpGet { url } => {
+                if !self.http.spawn(url.clone()) {
+                    log.push(format!("http_get dropped (too many in flight): {url}"));
+                }
                 false
             }
             _ => true,
@@ -508,12 +517,25 @@ impl LiveState {
                 _ => {}
             }
         }
+        // Finished http_get requests broadcast to every scripted component;
+        // their handlers' actions join this frame's batch below.
+        for (status, body) in self.http.drain_done() {
+            for comp in self.scripts.scripted() {
+                script_actions.extend(self.scripts.on_http(comp, i64::from(status), &body));
+            }
+        }
         script_actions.extend(self.scripts.tick(now));
         if !script_actions.is_empty() {
-            // Cross-board messages route through the app, not the device.
+            // Cross-board messages and HTTP fetches run host-side, not on the device.
             script_actions.retain(|a| match a {
                 Action::BoardMsg { to, text } => {
                     self.outbox.push((to.clone(), text.clone()));
+                    false
+                }
+                Action::HttpGet { url } => {
+                    if !self.http.spawn(url.clone()) {
+                        log.push(format!("http_get dropped (too many in flight): {url}"));
+                    }
                     false
                 }
                 _ => true,

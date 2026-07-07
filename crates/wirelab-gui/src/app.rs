@@ -154,6 +154,37 @@ pub struct BackgroundBoard {
     revs: (u64, u64, u64, u64),
 }
 
+impl BackgroundBoard {
+    /// GPIOs currently driven as outputs, for wire-safety verdicts.
+    pub fn output_gpios(&self) -> Vec<u8> {
+        self.bindings.outputs.values().map(|o| o.gpio).collect()
+    }
+
+    /// Re-plan after a remote structural edit: fresh netlist + bindings, and
+    /// a bumped topo revision so the live session reapplies its pin setup.
+    pub fn set_topo(&mut self, circuit: &wirelab_core::circuit::Circuit, lib: &Library) {
+        if let Some(board) = lib.board(&circuit.board_id) {
+            let netlist = Netlist::build(circuit, board, lib);
+            let (_msgs, bindings) = plan_setup(circuit, board, lib, &netlist);
+            self.netlist = netlist;
+            self.bindings = bindings;
+            self.revs.0 += 1;
+            self.revs.1 += 1;
+        }
+    }
+
+    /// Hot-swap this parked board's flow (e.g. a remote edit): recompile and
+    /// bump the frozen flow revision so its next tick installs the script.
+    pub fn set_flow(&mut self, graph: &wirelab_core::flow::FlowGraph) {
+        self.flow_code = if graph.nodes.is_empty() {
+            None
+        } else {
+            wirelab_core::flow::compile(graph).ok()
+        };
+        self.revs.3 += 1;
+    }
+}
+
 pub struct WireLabApp {
     pub lib: Library,
     pub boards_dir: PathBuf,

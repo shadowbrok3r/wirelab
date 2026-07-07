@@ -953,7 +953,7 @@ fn infer_type(expr: &str) -> Option<&'static str> {
     if e.is_empty() {
         return None;
     }
-    const CALLS: &[(&str, &'static str)] = &[
+    const CALLS: &[(&str, &str)] = &[
         ("pin(", "Pin"),
         ("comp(", "Component"),
         ("millis()", "int (ms)"),

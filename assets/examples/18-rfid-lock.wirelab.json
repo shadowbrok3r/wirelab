@@ -1,0 +1,444 @@
+{
+ "name": "RFID lock (RC522 over SPI -> servo bolt + LEDs)",
+ "circuit": {
+  "board_id": "esp32-c5-devkitc-1",
+  "board_pos": [
+   0.0,
+   0.0
+  ],
+  "components": {
+   "1": {
+    "id": 1,
+    "def_id": "rfid-rc522",
+    "pos": [
+     45,
+     55
+    ],
+    "rotation": 0,
+    "label": "reader",
+    "props": {},
+    "state": {
+     "kind": "none"
+    },
+    "script": "// RFID door lock (SPI). The RC522 talks over SPI2; we bring the bus up in\n// on_start and poll it. The SIMULATOR has no card, so tap the on-board\n// BOOT button to fake a scan -- even scans read as the authorized card,\n// odd scans as a stranger. On a real board an RC522 sits on sck 6,\n// mosi 7, miso 0, cs 1, rst 23 and the reply lands in on_spi().\n//\n// You are `reader`; `bolt` (servo), `ok_led`, `deny_led`, `beeper`.\n\nfn scan() {\n    spi_xfer(1, [0x02, 0x00, 0x00, 0x00, 0x00]);   // cs=GPIO1, read-UID cmd\n}\n\nfn on_start() {\n    spi_setup(6, 7, 0, 4000);           // sck, mosi, miso, kHz\n    pin(23).output();\n    pin(23).high();                     // hold the RC522 out of reset\n    pin(28).input_pullup();             // BOOT button = fake-scan trigger\n    this.scans = 0;\n    bolt.set_angle(0);                  // deadbolt thrown\n    ok_led.off();\n    deny_led.off();\n    log(\"lock armed -- tap BOOT to simulate a card\");\n}\n\nfn on_pin(gpio, high) {\n    if gpio != 28 || high { return; }   // BOOT is active-low\n    this.scans += 1;\n    scan();\n    if this.scans % 2 == 0 {\n        deny_led.off();\n        ok_led.on();\n        bolt.set_angle(90);             // retract the bolt\n        beeper.beep(80);\n        log(\"access granted\");\n        after(4000, || { ok_led.off(); bolt.set_angle(0); log(\"re-locked\"); });\n    } else {\n        deny_led.on();\n        beeper.beep(300);\n        log(\"access DENIED\");\n        after(1200, || deny_led.off());\n    }\n}\n\nfn on_spi(data) {\n    // On real hardware this holds the bytes the card clocked back.\n    log(`card bytes: ${data.len()}`);\n}\n"
+   },
+   "2": {
+    "id": 2,
+    "def_id": "servo-sg90",
+    "pos": [
+     140,
+     40
+    ],
+    "rotation": 0,
+    "label": "bolt",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "3": {
+    "id": 3,
+    "def_id": "led-green",
+    "pos": [
+     45,
+     12
+    ],
+    "rotation": 0,
+    "label": "ok_led",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "4": {
+    "id": 4,
+    "def_id": "resistor-220",
+    "pos": [
+     30,
+     12
+    ],
+    "rotation": 0,
+    "label": "",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "5": {
+    "id": 5,
+    "def_id": "led-red",
+    "pos": [
+     95,
+     12
+    ],
+    "rotation": 0,
+    "label": "deny_led",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "6": {
+    "id": 6,
+    "def_id": "resistor-220",
+    "pos": [
+     80,
+     12
+    ],
+    "rotation": 0,
+    "label": "",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "7": {
+    "id": 7,
+    "def_id": "buzzer-active",
+    "pos": [
+     140,
+     110
+    ],
+    "rotation": 0,
+    "label": "beeper",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   }
+  },
+  "wires": {
+   "1": {
+    "id": 1,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "vcc"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "3V3"
+    },
+    "color": [
+     220,
+     60,
+     50
+    ],
+    "waypoints": []
+   },
+   "2": {
+    "id": 2,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "3": {
+    "id": 3,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO6"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "sck"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "4": {
+    "id": 4,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO7"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "mosi"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "5": {
+    "id": 5,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO0"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "miso"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "6": {
+    "id": 6,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO1"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "sda"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "7": {
+    "id": 7,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO23"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "rst"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "8": {
+    "id": 8,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "vcc"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "5V"
+    },
+    "color": [
+     220,
+     60,
+     50
+    ],
+    "waypoints": []
+   },
+   "9": {
+    "id": 9,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND2"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "10": {
+    "id": 10,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO10"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "signal"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "11": {
+    "id": 11,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO24"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "a"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "12": {
+    "id": 12,
+    "a": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "anode"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "13": {
+    "id": 13,
+    "a": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "cathode"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND3"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "14": {
+    "id": 14,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO8"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 6,
+     "terminal": "a"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "15": {
+    "id": 15,
+    "a": {
+     "at": "terminal",
+     "comp": 6,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 5,
+     "terminal": "anode"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "16": {
+    "id": 16,
+    "a": {
+     "at": "terminal",
+     "comp": 5,
+     "terminal": "cathode"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND4"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "17": {
+    "id": 17,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO9"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "signal"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "18": {
+    "id": 18,
+    "a": {
+     "at": "terminal",
+     "comp": 7,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   }
+  },
+  "next_comp": 8,
+  "next_wire": 19
+ },
+ "program": {
+  "rules": []
+ }
+}

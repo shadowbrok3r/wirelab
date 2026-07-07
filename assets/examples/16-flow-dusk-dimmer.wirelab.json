@@ -1,0 +1,410 @@
+{
+ "name": "Flow graph: dusk dimmer (LDR -> map -> pwm + rgb, no code)",
+ "circuit": {
+  "board_id": "esp32-c5-devkitc-1",
+  "board_pos": [
+   0.0,
+   0.0
+  ],
+  "components": {
+   "1": {
+    "id": 1,
+    "def_id": "photoresistor-ldr",
+    "pos": [
+     55,
+     30
+    ],
+    "rotation": 0,
+    "label": "ldr",
+    "props": {},
+    "state": {
+     "kind": "fraction",
+     "value": 0.5
+    }
+   },
+   "2": {
+    "id": 2,
+    "def_id": "resistor-10k",
+    "pos": [
+     55,
+     46
+    ],
+    "rotation": 0,
+    "label": "",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "3": {
+    "id": 3,
+    "def_id": "led-yellow",
+    "pos": [
+     55,
+     12
+    ],
+    "rotation": 0,
+    "label": "lamp",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "4": {
+    "id": 4,
+    "def_id": "resistor-220",
+    "pos": [
+     38,
+     12
+    ],
+    "rotation": 0,
+    "label": "",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   }
+  },
+  "wires": {
+   "1": {
+    "id": 1,
+    "a": {
+     "at": "board_pin",
+     "key": "3V3"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "a"
+    },
+    "color": [
+     220,
+     60,
+     50
+    ],
+    "waypoints": []
+   },
+   "2": {
+    "id": 2,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO1"
+    },
+    "color": [
+     190,
+     120,
+     255
+    ],
+    "waypoints": []
+   },
+   "3": {
+    "id": 3,
+    "a": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "a"
+    },
+    "color": [
+     190,
+     120,
+     255
+    ],
+    "waypoints": []
+   },
+   "4": {
+    "id": 4,
+    "a": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   },
+   "5": {
+    "id": 5,
+    "a": {
+     "at": "board_pin",
+     "key": "GPIO10"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "a"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "6": {
+    "id": 6,
+    "a": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "anode"
+    },
+    "color": [
+     86,
+     156,
+     255
+    ],
+    "waypoints": []
+   },
+   "7": {
+    "id": 7,
+    "a": {
+     "at": "terminal",
+     "comp": 3,
+     "terminal": "cathode"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND2"
+    },
+    "color": [
+     40,
+     40,
+     40
+    ],
+    "waypoints": []
+   }
+  },
+  "next_comp": 5,
+  "next_wire": 8
+ },
+ "program": {
+  "rules": []
+ },
+ "flow": {
+  "nodes": [
+   {
+    "kind": {
+     "t": "OnReading",
+     "comp": "ldr"
+    },
+    "pos": [
+     40,
+     40
+    ]
+   },
+   {
+    "kind": {
+     "t": "MapRange",
+     "in_min": 0.0,
+     "in_max": 3100.0,
+     "out_min": 0.0,
+     "out_max": 255.0
+    },
+    "pos": [
+     250,
+     10
+    ]
+   },
+   {
+    "kind": {
+     "t": "MapRange",
+     "in_min": 0.0,
+     "in_max": 3100.0,
+     "out_min": 255.0,
+     "out_max": 0.0
+    },
+    "pos": [
+     250,
+     90
+    ]
+   },
+   {
+    "kind": {
+     "t": "Rgb"
+    },
+    "pos": [
+     470,
+     40
+    ]
+   },
+   {
+    "kind": {
+     "t": "MapRange",
+     "in_min": 0.0,
+     "in_max": 3100.0,
+     "out_min": 1000.0,
+     "out_max": 0.0
+    },
+    "pos": [
+     250,
+     180
+    ]
+   },
+   {
+    "kind": {
+     "t": "Pwm",
+     "gpio": 10,
+     "freq_hz": 1000
+    },
+    "pos": [
+     470,
+     180
+    ]
+   },
+   {
+    "kind": {
+     "t": "Compare",
+     "op": "Lt",
+     "value": 1200.0
+    },
+    "pos": [
+     250,
+     270
+    ]
+   },
+   {
+    "kind": {
+     "t": "Log",
+     "label": "dark"
+    },
+    "pos": [
+     470,
+     270
+    ]
+   },
+   {
+    "kind": {
+     "t": "Every",
+     "ms": 2000.0
+    },
+    "pos": [
+     40,
+     350
+    ]
+   },
+   {
+    "kind": {
+     "t": "Log",
+     "label": "dusk monitor"
+    },
+    "pos": [
+     250,
+     350
+    ]
+   }
+  ],
+  "wires": [
+   {
+    "from": [
+     0,
+     0
+    ],
+    "to": [
+     1,
+     0
+    ]
+   },
+   {
+    "from": [
+     0,
+     0
+    ],
+    "to": [
+     2,
+     0
+    ]
+   },
+   {
+    "from": [
+     0,
+     0
+    ],
+    "to": [
+     4,
+     0
+    ]
+   },
+   {
+    "from": [
+     0,
+     0
+    ],
+    "to": [
+     6,
+     0
+    ]
+   },
+   {
+    "from": [
+     1,
+     0
+    ],
+    "to": [
+     3,
+     0
+    ]
+   },
+   {
+    "from": [
+     2,
+     0
+    ],
+    "to": [
+     3,
+     1
+    ]
+   },
+   {
+    "from": [
+     4,
+     0
+    ],
+    "to": [
+     5,
+     0
+    ]
+   },
+   {
+    "from": [
+     6,
+     0
+    ],
+    "to": [
+     7,
+     0
+    ]
+   },
+   {
+    "from": [
+     8,
+     0
+    ],
+    "to": [
+     9,
+     0
+    ]
+   }
+  ]
+ }
+}

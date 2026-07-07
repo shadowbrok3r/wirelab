@@ -173,6 +173,11 @@ impl BackgroundBoard {
         }
     }
 
+    /// Bump the frozen script revision so the next tick re-syncs scripts.
+    pub fn bump_script(&mut self) {
+        self.revs.2 += 1;
+    }
+
     /// Hot-swap this parked board's flow (e.g. a remote edit): recompile and
     /// bump the frozen flow revision so its next tick installs the script.
     pub fn set_flow(&mut self, graph: &wirelab_core::flow::FlowGraph) {

@@ -5,6 +5,7 @@
 //! through a channel; the UI drains it once per frame.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
@@ -57,6 +58,8 @@ pub enum Cmd {
     MoveComponents { board_id: u64, moves: Vec<(u32, [f32; 2])> },
     /// Remote structural edit (add/remove component/wire) on any board.
     EditBoard { board_id: u64, op: EditOp },
+    /// Remote script edit on any board: sets the component's script and lints it.
+    SetBoardScript { board_id: u64, comp: u32, source: String },
 }
 
 /// One remote structural edit, board-addressed. Endpoints use the same
@@ -82,6 +85,20 @@ pub fn parse_edit_push(body: &str) -> Result<Cmd, String> {
     let board_id = v.get("board_id").and_then(Value::as_u64).ok_or("missing board_id")?;
     let op: EditOp = serde_json::from_value(v).map_err(|e| format!("bad edit: {e}"))?;
     Ok(Cmd::EditBoard { board_id, op })
+}
+
+/// Parse a remote script-edit body: `{board_id, comp, source}`.
+pub fn parse_script_push(body: &str) -> Result<Cmd, String> {
+    let v: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    Ok(Cmd::SetBoardScript {
+        board_id: v.get("board_id").and_then(Value::as_u64).ok_or("missing board_id")?,
+        comp: v
+            .get("comp")
+            .and_then(Value::as_u64)
+            .map(|n| n as u32)
+            .ok_or("missing comp")?,
+        source: v.get("source").and_then(Value::as_str).ok_or("missing source")?.to_string(),
+    })
 }
 
 /// Parse a remote flow-edit body: `{board_id, base, nodes, wires}`.
@@ -113,7 +130,7 @@ fn apply_edit(
     live_output_gpios: &[u8],
     op: EditOp,
 ) -> Result<Value, String> {
-    use wirelab_core::circuit::{CompId, PlacedComponent, WireId};
+    use wirelab_core::circuit::{CompId, Endpoint, PlacedComponent, WireId};
     use wirelab_core::component::CompState;
     use wirelab_core::netlist::{Netlist, WireVerdict, wire_verdict};
     match op {
@@ -144,6 +161,19 @@ fn apply_edit(
         }
         EditOp::AddWire { a, b } => {
             let board = lib.board(&circuit.board_id).ok_or("no board profile")?;
+            // Reject dangling endpoints so a malformed client can't wire to a
+            // pin or terminal that doesn't exist on this board/component.
+            let valid = |ep: &Endpoint| match ep {
+                Endpoint::BoardPin { key } => board.pins.iter().any(|p| &p.key == key),
+                Endpoint::Terminal { comp, terminal } => circuit
+                    .components
+                    .get(comp)
+                    .and_then(|c| lib.component(&c.def_id))
+                    .is_some_and(|d| d.terminals.iter().any(|t| &t.id == terminal)),
+            };
+            if !valid(&a) || !valid(&b) {
+                return Err("wire references an endpoint that doesn't exist".into());
+            }
             let nl = Netlist::build(circuit, board, lib);
             match wire_verdict(&nl, board, &a, &b, live_output_gpios) {
                 WireVerdict::Blocked(why) => Err(format!("refused: {why}")),
@@ -163,6 +193,11 @@ fn apply_edit(
             Ok(serde_json::json!({ "ok": true, "removed": wire }))
         }
     }
+}
+
+/// Auto-discovery beacon payload: `WIRELAB-HOST <view_port> <hostname>`.
+pub fn host_beacon(port: u16, name: &str) -> String {
+    format!("WIRELAB-HOST {port} {name}")
 }
 
 /// Content hash used as the optimistic-concurrency base for remote flow edits.
@@ -195,6 +230,8 @@ pub struct McpServer {
     pub addr: String,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
+    beacon_stop: Arc<AtomicBool>,
+    beacon_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl McpServer {
@@ -271,6 +308,7 @@ impl McpServer {
                     let get_ask = ask_ui.clone();
                     let flow_ask = ask_ui.clone();
                     let edit_ask = ask_ui.clone();
+                    let script_ask = ask_ui.clone();
                     let move_ask = ask_ui;
                     let view_router = axum::Router::new()
                         .route(
@@ -292,6 +330,16 @@ impl McpServer {
                             axum::routing::post(move |body: String| async move {
                                 match parse_edit_push(&body) {
                                     Ok(cmd) => edit_ask(cmd).await,
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e })
+                                        .to_string(),
+                                }
+                            }),
+                        )
+                        .route(
+                            "/project/script",
+                            axum::routing::post(move |body: String| async move {
+                                match parse_script_push(&body) {
+                                    Ok(cmd) => script_ask(cmd).await,
                                     Err(e) => serde_json::json!({ "ok": false, "error": e })
                                         .to_string(),
                                 }
@@ -327,16 +375,51 @@ impl McpServer {
             .map_err(|e| e.to_string())?;
 
         match ready_rx.recv_timeout(std::time::Duration::from_secs(5)) {
-            Ok(Ok(())) => Ok(McpServer {
-                rx,
-                addr: format!("http://127.0.0.1:{port}/mcp"),
-                shutdown: Some(stop_tx),
-                thread: Some(thread),
-            }),
+            Ok(Ok(())) => {
+                let view_port = port + 3;
+                let beacon_stop = Arc::new(AtomicBool::new(false));
+                let beacon_thread = spawn_beacon(view_port, beacon_stop.clone());
+                Ok(McpServer {
+                    rx,
+                    addr: format!("http://127.0.0.1:{port}/mcp"),
+                    shutdown: Some(stop_tx),
+                    thread: Some(thread),
+                    beacon_stop,
+                    beacon_thread,
+                })
+            }
             Ok(Err(e)) => Err(e),
             Err(_) => Err("MCP server did not start in time".into()),
         }
     }
+}
+
+/// Broadcast a UDP discovery beacon every 2 s until `stop` is set.
+fn spawn_beacon(
+    view_port: u16,
+    stop: Arc<AtomicBool>,
+) -> Option<std::thread::JoinHandle<()>> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.set_broadcast(true).ok()?;
+    let name = std::env::var("HOSTNAME").unwrap_or_else(|_| "wirelab".to_string());
+    let payload = host_beacon(view_port, &name);
+    let targets = [
+        std::net::SocketAddr::from(([255, 255, 255, 255], 4521)),
+        std::net::SocketAddr::from(([127, 0, 0, 1], 4521)),
+    ];
+    Some(std::thread::spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            for target in &targets {
+                let _ = socket.send_to(payload.as_bytes(), target);
+            }
+            for _ in 0..20 {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }))
 }
 
 impl Drop for McpServer {
@@ -344,7 +427,11 @@ impl Drop for McpServer {
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
+        self.beacon_stop.store(true, Ordering::Relaxed);
         if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        if let Some(t) = self.beacon_thread.take() {
             let _ = t.join();
         }
     }
@@ -1106,6 +1193,59 @@ impl WireLabApp {
                 self.console.push(format!("[{name}] circuit edited from a remote editor"));
                 Ok(result)
             }
+            Cmd::SetBoardScript { board_id, comp, source } => {
+                self.project.sync_active();
+                let Some(idx) = self.project.boards.iter().position(|b| b.id == board_id)
+                else {
+                    return Err("no such board".into());
+                };
+                let is_active = idx == self.project.active;
+                let id = CompId(comp);
+                let circuit = if is_active {
+                    &mut self.project.circuit
+                } else {
+                    &mut self.project.boards[idx].circuit
+                };
+                if !circuit.components.contains_key(&id) {
+                    return Err("no such component".into());
+                }
+                let script = if source.trim().is_empty() { None } else { Some(source.clone()) };
+                circuit.components.get_mut(&id).unwrap().script = script;
+                if is_active {
+                    self.script_rev += 1;
+                } else if let Some(bb) = self.background.get_mut(&board_id) {
+                    bb.bump_script();
+                }
+                let circuit = if is_active {
+                    &self.project.circuit
+                } else {
+                    &self.project.boards[idx].circuit
+                };
+                let names = wirelab_core::script::component_names(circuit, &self.lib);
+                let comp_name =
+                    names.get(&id).cloned().unwrap_or_else(|| id.0.to_string());
+                let mut api: Vec<String> = names.into_values().collect();
+                api.sort();
+                self.linter.set_api(&api);
+                let diags: Vec<Value> = if source.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    self.linter
+                        .lint(&source)
+                        .iter()
+                        .map(|d| json!({"line": d.line, "col": d.col, "message": d.message}))
+                        .collect()
+                };
+                let compile_error = if source.trim().is_empty() {
+                    None
+                } else {
+                    rhai::Engine::new().compile(&source).err().map(|e| e.to_string())
+                };
+                let board_name = self.project.boards[idx].name.clone();
+                self.console
+                    .push(format!("[{board_name}] script for {comp_name} edited remotely"));
+                Ok(json!({ "ok": true, "diagnostics": diags, "compile_error": compile_error }))
+            }
             Cmd::MoveComponents { board_id, moves } => {
                 self.project.sync_active();
                 let Some(idx) = self.project.boards.iter().position(|b| b.id == board_id)
@@ -1203,42 +1343,6 @@ mod tests {
         assert!(matches!(cmd, Cmd::SetBoardFlow { board_id: 2, base: 7, .. }));
         let cmd = parse_move_push(r#"{"board_id":1,"moves":[[3,[10.0,20.0]]]}"#).unwrap();
         match cmd {
-            Cmd::EditBoard { board_id, op } => {
-                self.project.sync_active();
-                let Some(idx) = self.project.boards.iter().position(|b| b.id == board_id)
-                else {
-                    return Err("no such board".into());
-                };
-                let name = self.project.boards[idx].name.clone();
-                let result = if idx == self.project.active {
-                    let outs: Vec<u8> =
-                        self.cache.bindings.outputs.values().map(|o| o.gpio).collect();
-                    // Working copy is authoritative for the active board; it
-                    // folds into boards[active] at the next sync_active.
-                    let lib = self.lib.clone();
-                    let r = apply_edit(&mut self.project.circuit, &lib, &outs, op)?;
-                    self.topo_rev += 1;
-                    self.state_rev += 1;
-                    r
-                } else {
-                    let outs: Vec<u8> = self
-                        .background
-                        .get(&board_id)
-                        .map(|bb| bb.output_gpios())
-                        .unwrap_or_default();
-                    let lib = self.lib.clone();
-                    let circuit = &mut self.project.boards[idx].circuit;
-                    let r = apply_edit(circuit, &lib, &outs, op)?;
-                    // A live parked board re-plans its pin setup immediately.
-                    let circuit = self.project.boards[idx].circuit.clone();
-                    if let Some(bb) = self.background.get_mut(&board_id) {
-                        bb.set_topo(&circuit, &self.lib);
-                    }
-                    r
-                };
-                self.console.push(format!("[{name}] circuit edited from a remote editor"));
-                Ok(result)
-            }
             Cmd::MoveComponents { board_id, moves } => {
                 assert_eq!(board_id, 1);
                 assert_eq!(moves, vec![(3, [10.0, 20.0])]);
@@ -1255,6 +1359,97 @@ mod tests {
             pos: [0.0, 0.0],
         });
         assert_ne!(h0, flow_hash(&g), "hash tracks content");
+    }
+
+    #[test]
+    fn edit_push_parses_and_applies_with_wire_safety() {
+        use wirelab_core::circuit::Circuit;
+        use wirelab_core::library::Library;
+
+        // Parsing: each op shape round-trips into the right Cmd.
+        let cmd = parse_edit_push(
+            r#"{"board_id":3,"op":"add_comp","def_id":"led-red","pos":[40.0,20.0]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            &cmd,
+            Cmd::EditBoard { board_id: 3, op: EditOp::AddComp { def_id, .. } } if def_id == "led-red"
+        ));
+        assert!(parse_edit_push(r#"{"op":"add_comp","def_id":"x","pos":[0,0]}"#).is_err());
+
+        // Applying against a real board, with the wire-safety verdict.
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let lib = Library::load(&assets.join("boards"), &assets.join("components")).unwrap();
+        let mut circuit = Circuit::new("esp32-c5-devkitc-1");
+
+        let add = parse_edit_push(
+            r#"{"board_id":1,"op":"add_comp","def_id":"led-red","pos":[40.0,20.0]}"#,
+        )
+        .unwrap();
+        let Cmd::EditBoard { op, .. } = add else { panic!() };
+        let r = apply_edit(&mut circuit, &lib, &[], op).unwrap();
+        let comp = r["comp"].as_u64().unwrap() as u32;
+        assert_eq!(circuit.components.len(), 1);
+
+        // A legal wire (GPIO -> LED anode) is accepted.
+        let anode = serde_json::json!({ "at": "terminal", "comp": comp, "terminal": "anode" });
+        let gpio2 = serde_json::json!({ "at": "board_pin", "key": "GPIO2" });
+        let body = serde_json::json!({ "board_id": 1, "op": "add_wire", "a": gpio2, "b": anode });
+        let Cmd::EditBoard { op, .. } = parse_edit_push(&body.to_string()).unwrap() else {
+            panic!()
+        };
+        assert!(apply_edit(&mut circuit, &lib, &[], op).unwrap()["ok"].as_bool().unwrap());
+
+        // A rail short (5V -> GND) is refused by the same verdict the desktop uses.
+        let short = serde_json::json!({
+            "board_id": 1, "op": "add_wire",
+            "a": { "at": "board_pin", "key": "5V" },
+            "b": { "at": "board_pin", "key": "GND1" },
+        });
+        let Cmd::EditBoard { op, .. } = parse_edit_push(&short.to_string()).unwrap() else {
+            panic!()
+        };
+        assert!(apply_edit(&mut circuit, &lib, &[], op).is_err());
+
+        // A wire to a pin that doesn't exist is rejected, not silently added.
+        let phantom = serde_json::json!({
+            "board_id": 1, "op": "add_wire",
+            "a": { "at": "board_pin", "key": "NO_SUCH_PIN" },
+            "b": { "at": "board_pin", "key": "GND1" },
+        });
+        let Cmd::EditBoard { op, .. } = parse_edit_push(&phantom.to_string()).unwrap() else {
+            panic!()
+        };
+        assert!(apply_edit(&mut circuit, &lib, &[], op).is_err());
+
+        // Removing the component drops it.
+        let rm = parse_edit_push(&format!(r#"{{"board_id":1,"op":"remove_comp","comp":{comp}}}"#))
+            .unwrap();
+        let Cmd::EditBoard { op, .. } = rm else { panic!() };
+        apply_edit(&mut circuit, &lib, &[], op).unwrap();
+        assert!(circuit.components.is_empty());
+    }
+
+    #[test]
+    fn script_push_parses_and_rejects_missing_fields() {
+        let cmd =
+            parse_script_push(r#"{"board_id":1,"comp":2,"source":"fn on_start(){}"}"#).unwrap();
+        match cmd {
+            Cmd::SetBoardScript { board_id, comp, source } => {
+                assert_eq!(board_id, 1);
+                assert_eq!(comp, 2);
+                assert_eq!(source, "fn on_start(){}");
+            }
+            _ => panic!(),
+        }
+        assert!(parse_script_push(r#"{"comp":2,"source":"x"}"#).is_err());
+        assert!(parse_script_push(r#"{"board_id":1,"source":"x"}"#).is_err());
+        assert!(parse_script_push(r#"{"board_id":1,"comp":2}"#).is_err());
+    }
+
+    #[test]
+    fn host_beacon_format() {
+        assert_eq!(host_beacon(4530, "desk"), "WIRELAB-HOST 4530 desk");
     }
 
     #[test]

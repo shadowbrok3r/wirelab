@@ -634,149 +634,20 @@ fn resistor_bands(ohms: f32) -> [Color32; 3] {
     [digit(d1), digit(d2), digit(mag.clamp(-1, 9))]
 }
 
-/// How a wire leaves its endpoints and dodges its siblings.
-#[derive(Clone, Copy, Default)]
-pub struct Route {
-    /// Unit-ish exit direction at each end (away from the pad's body);
-    /// `Vec2::ZERO` = no preference (routing dots, the mouse cursor).
-    pub exit_a: Vec2,
-    pub exit_b: Vec2,
-    /// Small deterministic offset so parallel runs don't overlap.
-    pub lane: i32,
-    /// Stub length in pixels before the wire starts routing.
-    pub stub: f32,
-    /// Pixels needed to clear each endpoint's body when the route has to
-    /// double back — keeps wires from cutting through their own component.
-    pub clear_a: f32,
-    pub clear_b: f32,
-}
+pub use wirelab_core::geometry::Route;
 
 /// Orthogonal wire path between two screen points, honoring exit stubs,
-/// with rounded corners.
+/// with rounded corners. Delegates to the shared core geometry.
 pub fn wire_path(a: Pos2, b: Pos2, route: Route) -> Vec<Pos2> {
-    let snap = |v: Vec2| -> Vec2 {
-        if v.length() < 0.1 {
-            Vec2::ZERO
-        } else if v.x.abs() >= v.y.abs() {
-            Vec2::new(v.x.signum(), 0.0)
-        } else {
-            Vec2::new(0.0, v.y.signum())
-        }
-    };
-    let (ea, eb) = (snap(route.exit_a), snap(route.exit_b));
-    let mut sa = a + ea * route.stub;
-    let mut sb = b + eb * route.stub;
-    let lane = route.lane as f32 * 7.0;
-
-    // When the target sits BEHIND an exit direction, step sideways past the
-    // body first instead of routing straight back through it.
-    let dodge = |s: Pos2, e: Vec2, toward: Pos2, clear: f32| -> Option<Pos2> {
-        if e == Vec2::ZERO || clear <= 0.0 {
-            return None;
-        }
-        let behind = if e.y == 0.0 {
-            (toward.x - s.x) * e.x < 0.0
-        } else {
-            (toward.y - s.y) * e.y < 0.0
-        };
-        if !behind {
-            return None;
-        }
-        if e.y == 0.0 {
-            let dir = if toward.y >= s.y { 1.0 } else { -1.0 };
-            Some(Pos2::new(s.x, s.y + dir * clear))
-        } else {
-            let dir = if toward.x >= s.x { 1.0 } else { -1.0 };
-            Some(Pos2::new(s.x + dir * clear, s.y))
-        }
-    };
-    let extra_a = dodge(sa, ea, sb, route.clear_a);
-    if let Some(p) = extra_a {
-        sa = p;
-    }
-    let extra_b = dodge(sb, eb, sa, route.clear_b);
-    if let Some(p) = extra_b {
-        sb = p;
-    }
-
-    // Fall back to geometry when an end has no exit preference.
-    let axis_h = |e: Vec2, from: Pos2, to: Pos2| {
-        if e == Vec2::ZERO { (to.x - from.x).abs() >= (to.y - from.y).abs() } else { e.y == 0.0 }
-    };
-    let mut ha = axis_h(ea, sa, sb);
-    let mut hb = axis_h(eb, sb, sa);
-    // After a dodge the leg leaves perpendicular to the original exit.
-    if extra_a.is_some() {
-        ha = ea.y != 0.0;
-    }
-    if extra_b.is_some() {
-        hb = eb.y != 0.0;
-    }
-
-    let mut corners: Vec<Pos2> = vec![a];
-    if extra_a.is_some() {
-        corners.push(a + ea * route.stub);
-    }
-    if sa != a {
-        corners.push(sa);
-    }
-    match (ha, hb) {
-        (true, true) => {
-            let mid_x = (sa.x + sb.x) / 2.0 + lane;
-            corners.push(Pos2::new(mid_x, sa.y));
-            corners.push(Pos2::new(mid_x, sb.y));
-        }
-        (false, false) => {
-            let mid_y = (sa.y + sb.y) / 2.0 + lane;
-            corners.push(Pos2::new(sa.x, mid_y));
-            corners.push(Pos2::new(sb.x, mid_y));
-        }
-        (true, false) => corners.push(Pos2::new(sb.x, sa.y)),
-        (false, true) => corners.push(Pos2::new(sa.x, sb.y)),
-    }
-    if sb != b {
-        corners.push(sb);
-    }
-    if extra_b.is_some() {
-        corners.push(b + eb * route.stub);
-    }
-    corners.push(b);
-    corners.dedup_by(|p, q| (*p - *q).length() < 0.5);
-    if corners.len() < 2 {
-        return vec![a, b];
-    }
-    rounded_polyline(&corners, 9.0)
+    wirelab_core::geometry::wire_path([a.x, a.y], [b.x, b.y], &route)
+        .into_iter()
+        .map(|p| Pos2::new(p[0], p[1]))
+        .collect()
 }
 
 /// Plain midpoint route, for previews with no endpoint context.
 pub fn wire_points(a: Pos2, b: Pos2) -> Vec<Pos2> {
     wire_path(a, b, Route::default())
-}
-
-/// Densify a corner path into a polyline with quarter-round corners.
-fn rounded_polyline(corners: &[Pos2], radius: f32) -> Vec<Pos2> {
-    let mut pts = vec![corners[0]];
-    for i in 1..corners.len().saturating_sub(1) {
-        let (prev, p, next) = (corners[i - 1], corners[i], corners[i + 1]);
-        let (d1, d2) = (p - prev, next - p);
-        let r = radius.min(d1.length() * 0.5).min(d2.length() * 0.5);
-        if r < 0.5 {
-            pts.push(p);
-            continue;
-        }
-        let enter = p - d1.normalized() * r;
-        let exit = p + d2.normalized() * r;
-        for k in 0..=6 {
-            let t = k as f32 / 6.0;
-            let u = 1.0 - t;
-            pts.push(Pos2::new(
-                u * u * enter.x + 2.0 * u * t * p.x + t * t * exit.x,
-                u * u * enter.y + 2.0 * u * t * p.y + t * t * exit.y,
-            ));
-        }
-    }
-    pts.push(*corners.last().unwrap());
-    pts
 }
 
 #[allow(clippy::too_many_arguments)]

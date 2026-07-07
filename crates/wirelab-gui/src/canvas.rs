@@ -80,30 +80,16 @@ impl WireLabApp {
     /// Which way a wire should leave this endpoint: away from the board
     /// edge for pins, away from the body for component terminals.
     fn endpoint_exit_dir(&self, ep: &Endpoint) -> Vec2 {
-        match ep {
-            Endpoint::BoardPin { key } => {
-                let Some(pin) = self
-                    .lib
-                    .board(&self.project.circuit.board_id)
-                    .and_then(|b| b.pin(key))
-                else {
-                    return Vec2::ZERO;
-                };
-                match pin.side {
-                    wirelab_core::board::Side::Left => Vec2::new(-1.0, 0.0),
-                    wirelab_core::board::Side::Right => Vec2::new(1.0, 0.0),
-                    wirelab_core::board::Side::Top => Vec2::new(0.0, -1.0),
-                    wirelab_core::board::Side::Bottom => Vec2::new(0.0, 1.0),
-                }
-            }
-            Endpoint::Terminal { comp, .. } => {
-                let Some(c) = self.project.circuit.components.get(comp) else {
-                    return Vec2::ZERO;
-                };
-                let Some(t) = self.endpoint_world(ep) else { return Vec2::ZERO };
-                Vec2::new(t[0] - c.pos[0], t[1] - c.pos[1])
-            }
-        }
+        let Some(board) = self.lib.board(&self.project.circuit.board_id) else {
+            return Vec2::ZERO;
+        };
+        let d = wirelab_core::geometry::endpoint_exit_dir(
+            &self.project.circuit,
+            board,
+            &self.lib,
+            ep,
+        );
+        Vec2::new(d[0], d[1])
     }
 
     /// Pixels a doubling-back wire must travel to clear this endpoint's body.
@@ -129,9 +115,11 @@ impl WireLabApp {
     ) -> Option<Vec<Pos2>> {
         let a = self.endpoint_world(&wire.a)?;
         let b = self.endpoint_world(&wire.b)?;
+        let ea = self.endpoint_exit_dir(&wire.a);
+        let eb = self.endpoint_exit_dir(&wire.b);
         let route = draw::Route {
-            exit_a: self.endpoint_exit_dir(&wire.a),
-            exit_b: self.endpoint_exit_dir(&wire.b),
+            exit_a: [ea.x, ea.y],
+            exit_b: [eb.x, eb.y],
             lane: (wire.id.0 % 5) as i32 - 2,
             stub: view.px(3.0).clamp(8.0, 20.0),
             clear_a: self.endpoint_clearance(view, &wire.a),
@@ -560,8 +548,9 @@ impl WireLabApp {
         // Wire rubber band / placement ghost.
         if let (Some(from), Some(p)) = (&self.canvas.wire_from, pointer)
             && let Some(a) = self.endpoint_world(from) {
+                let ea = self.endpoint_exit_dir(from);
                 let route = draw::Route {
-                    exit_a: self.endpoint_exit_dir(from),
+                    exit_a: [ea.x, ea.y],
                     stub: view.px(3.0).clamp(8.0, 20.0),
                     ..Default::default()
                 };

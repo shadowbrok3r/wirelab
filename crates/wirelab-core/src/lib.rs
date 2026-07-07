@@ -12,6 +12,7 @@ pub mod netlist;
 pub mod program;
 pub mod project;
 pub mod script;
+pub mod script_api;
 pub mod sim;
 pub mod validate;
 

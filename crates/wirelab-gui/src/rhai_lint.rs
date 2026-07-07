@@ -8,80 +8,8 @@ use rhai_hir::error::ErrorKind;
 use rhai_rowan::parser::Parser;
 use url::Url;
 
-/// One hoverable / completable API entry.
-pub struct ApiDoc {
-    pub name: &'static str,
-    pub sig: &'static str,
-    pub doc: &'static str,
-    /// Method on a component/pin handle (offered after `.`).
-    pub member: bool,
-    /// Takes arguments: completion leaves the cursor between the parens.
-    pub args: bool,
-}
-
-pub const API_DOCS: &[ApiDoc] = &[
-    ApiDoc { name: "log", sig: "log(data)", doc: "Print to the Console tab, prefixed with this component's name.", member: false, args: true },
-    ApiDoc { name: "millis", sig: "millis() -> int", doc: "Milliseconds since the session started.", member: false, args: false },
-    ApiDoc { name: "after", sig: "after(ms, || ...)", doc: "Run a closure later. Belongs to this component; recompiling cancels it. `this` is unavailable inside — capture locals first.", member: false, args: true },
-    ApiDoc { name: "pin", sig: "pin(gpio) -> Pin", doc: "Raw GPIO handle: .high() .low() .set(b) .toggle() .pwm(hz, permille) .is_high() .input_pullup() .input_pulldown() .input() .output()", member: false, args: true },
-    ApiDoc { name: "comp", sig: "comp(name) -> Component", doc: "Look a component up by its script name; errors when missing.", member: false, args: true },
-    ApiDoc { name: "chip", sig: "chip() -> string", doc: "The connected board's chip name, e.g. \"ESP32-C5\".", member: false, args: false },
-    ApiDoc { name: "board_has", sig: "board_has(what) -> bool", doc: "Case-insensitive substring match over the board's capability lines.", member: false, args: true },
-    ApiDoc { name: "uart", sig: "uart(tx, rx, baud)", doc: "Claim UART1 on any free pins (baud 0 releases it). Lines arrive via on_uart(line); the simulator echoes writes back.", member: false, args: true },
-    ApiDoc { name: "uart_send", sig: "uart_send(text | [bytes])", doc: "Transmit on UART1.", member: false, args: true },
-    ApiDoc { name: "send_board", sig: "send_board(board, text)", doc: "Send text to another board tab's scripts; they receive it in on_board_msg(from, text). Both boards must be connected.", member: false, args: true },
-    ApiDoc { name: "http_get", sig: "http_get(url)", doc: "Fetch a URL over the host's network (GET); the reply lands in on_http(status, body). Runs on the computer, not the chip.", member: false, args: true },
-    ApiDoc { name: "spi_setup", sig: "spi_setup(sck, mosi, miso, freq_khz)", doc: "Generic SPI bus on SPI2 (replaces the LCD if configured). CS pins are plain GPIOs per transfer.", member: false, args: true },
-    ApiDoc { name: "spi_xfer", sig: "spi_xfer(cs, [bytes])", doc: "Full-duplex transfer; the clocked-back bytes arrive in on_spi([bytes]). Sim echoes the written bytes.", member: false, args: true },
-    ApiDoc { name: "i2c_setup", sig: "i2c_setup(sda, scl, freq_khz)", doc: "I2C master on any pins (typ. 100 or 400 kHz).", member: false, args: true },
-    ApiDoc { name: "i2c_write", sig: "i2c_write(addr, [bytes])", doc: "Write bytes to a 7-bit address.", member: false, args: true },
-    ApiDoc { name: "i2c_read", sig: "i2c_read(addr, reg, len)", doc: "Read len bytes (optionally after selecting reg; pass 256 for none). Data arrives in on_i2c(addr, [bytes]).", member: false, args: true },
-    ApiDoc { name: "lcd_init", sig: "lcd_init(sck, mosi, cs, dc, rst)", doc: "Bring up an ST7735 SPI display (128x128). The simulator renders it on the component.", member: false, args: true },
-    ApiDoc { name: "lcd_clear", sig: "lcd_clear(r, g, b)", doc: "Fill the whole screen.", member: false, args: true },
-    ApiDoc { name: "lcd_rect", sig: "lcd_rect(x, y, w, h, r, g, b)", doc: "Fill a rectangle; repaint regions instead of clearing for smooth updates.", member: false, args: true },
-    ApiDoc { name: "lcd_text", sig: "lcd_text(x, y, text, r, g, b)", doc: "Draw 6x10 text at a pixel position.", member: false, args: true },
-    ApiDoc { name: "rgb", sig: "rgb(r, g, b)", doc: "Drive the board's addressable RGB LED (0..255 each). Real color on hardware via the RMT driver; colored marker in the simulator.", member: false, args: true },
-    ApiDoc { name: "me", sig: "me", doc: "Handle to the component this script is attached to.", member: false, args: false },
-    ApiDoc { name: "on", sig: ".on()", doc: "Switch the output on (polarity-aware).", member: true, args: false },
-    ApiDoc { name: "off", sig: ".off()", doc: "Switch the output off.", member: true, args: false },
-    ApiDoc { name: "toggle", sig: ".toggle()", doc: "Invert the output's current state.", member: true, args: false },
-    ApiDoc { name: "blink", sig: ".blink(period_ms)", doc: "Firmware-side blink; keeps running with zero round-trips.", member: true, args: true },
-    ApiDoc { name: "breathe", sig: ".breathe(period_ms)", doc: "Firmware-side sine fade.", member: true, args: true },
-    ApiDoc { name: "dim", sig: ".dim(percent)", doc: "PWM brightness, 0..100.", member: true, args: true },
-    ApiDoc { name: "set_angle", sig: ".set_angle(degrees)", doc: "Servo position, 0..180.", member: true, args: true },
-    ApiDoc { name: "beep", sig: ".beep(ms)", doc: "Buzzer on, then off after `ms`.", member: true, args: true },
-    ApiDoc { name: "tone", sig: ".tone(hz, ms)", doc: "PWM tone at `hz` for `ms`.", member: true, args: true },
-    ApiDoc { name: "act", sig: ".act(verb)", doc: "Run any component verb by name.", member: true, args: true },
-    ApiDoc { name: "is_on", sig: ".is_on() -> bool", doc: "Commanded output state, polarity-corrected.", member: true, args: false },
-    ApiDoc { name: "is_pressed", sig: ".is_pressed() -> bool", doc: "Logical input state from the latest telemetry.", member: true, args: false },
-    ApiDoc { name: "millivolts", sig: ".millivolts() -> int", doc: "Last analog sample for this component.", member: true, args: false },
-    ApiDoc { name: "high", sig: ".high()", doc: "Drive the pin high.", member: true, args: false },
-    ApiDoc { name: "low", sig: ".low()", doc: "Drive the pin low.", member: true, args: false },
-    ApiDoc { name: "set", sig: ".set(high)", doc: "Drive the pin to a level.", member: true, args: true },
-    ApiDoc { name: "pwm", sig: ".pwm(hz, permille)", doc: "PWM output; duty is 0..1000.", member: true, args: true },
-    ApiDoc { name: "is_high", sig: ".is_high() -> bool", doc: "Raw level from telemetry.", member: true, args: false },
-    ApiDoc { name: "watch_analog", sig: ".watch_analog(interval_ms)", doc: "Turn the pin into a sampled ADC input; read with .millivolts(). Basis of the ohmmeter example.", member: true, args: true },
-    ApiDoc { name: "input_pullup", sig: ".input_pullup()", doc: "Reconfigure as input with pull-up (e.g. the BOOT button).", member: true, args: false },
-    ApiDoc { name: "input_pulldown", sig: ".input_pulldown()", doc: "Reconfigure as input with pull-down.", member: true, args: false },
-    ApiDoc { name: "input", sig: ".input()", doc: "Reconfigure as floating input.", member: true, args: false },
-    ApiDoc { name: "output", sig: ".output()", doc: "Reconfigure as push-pull output.", member: true, args: false },
-];
-
-/// Callback names WireLab invokes, for hover docs.
-pub const CALLBACK_DOCS: &[(&str, &str)] = &[
-    ("on_start", "Runs after connect and after every Apply."),
-    ("on_press", "Push button pressed (this component)."),
-    ("on_release", "Push button released."),
-    ("on_change", "Any input changed; argument is the logical state."),
-    ("on_reading", "New analog sample; argument is millivolts."),
-    ("on_tick", "Every frame while connected; argument is elapsed ms."),
-    ("on_pin", "Raw pin edge anywhere on the board: (gpio, high)."),
-    ("on_uart", "A complete line arrived on UART1."),
-    ("on_spi", "An SPI transfer finished; argument is the [bytes] clocked back."),
-    ("on_i2c", "An I2C read finished: (addr, [bytes])."),
-    ("on_board_msg", "Text sent by another board tab via send_board: (from, text)."),
-    ("on_http", "An http_get finished: (status, body). Status 0 means the request failed and body holds the error."),
-];
+#[allow(unused_imports)]
+pub use wirelab_core::script_api::{API_DOCS, ApiDoc, CALLBACK_DOCS};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LintDiag {

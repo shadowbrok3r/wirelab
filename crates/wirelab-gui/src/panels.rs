@@ -856,46 +856,20 @@ impl WireLabApp {
             self.script_ed.completion = None;
             if focused && let Some(cr) = out.cursor_range {
                 let ci = cr.primary.index.0.min(chars.len());
-                let mut ws = ci;
-                while ws > 0 && is_ident(chars[ws - 1]) {
-                    ws -= 1;
-                }
-                let prefix: String = chars[ws..ci].iter().collect();
-                let member = ws > 0 && chars[ws - 1] == '.';
-                if member || !prefix.is_empty() {
-                    let mut items: Vec<(String, String, usize, String)> = Vec::new();
-                    for d in API_DOCS {
-                        if d.member != member || d.name == "me" || !d.name.starts_with(&prefix)
-                        {
-                            continue;
-                        }
-                        let (insert, back) =
-                            if d.args { (format!("{}()", d.name), 1) } else if d.member || d.sig.contains("()") {
-                                (format!("{}()", d.name), 0)
-                            } else {
-                                (d.name.to_string(), 0)
-                            };
-                        items.push((d.name.to_string(), insert, back, format!("{} — {}", d.sig, d.doc)));
-                    }
-                    if !member {
-                        if "me".starts_with(&prefix) && !prefix.is_empty() {
-                            items.push(("me".into(), "me".into(), 0, "this component".into()));
-                        }
-                        let mut comp_names: Vec<&String> = names.values().collect();
-                        comp_names.sort();
-                        for n in comp_names {
-                            if n.starts_with(&prefix) {
-                                items.push((n.clone(), n.clone(), 0, "component".into()));
-                            }
-                        }
-                    }
-                    let exact_only =
-                        items.len() == 1 && (items[0].0 == prefix || items[0].1 == prefix);
-                    if !items.is_empty() && !exact_only {
-                        items.truncate(10);
-                        self.script_ed.completion =
-                            Some(crate::app::Completion { items, selected: 0, word_start: ws });
-                    }
+                let comp_names: Vec<String> = names.values().cloned().collect();
+                if let Some(comp) =
+                    wirelab_core::script_api::completions(&self.script_ed.buffer, ci, &comp_names)
+                {
+                    let items = comp
+                        .items
+                        .into_iter()
+                        .map(|i| (i.label, i.insert, i.back, i.detail))
+                        .collect();
+                    self.script_ed.completion = Some(crate::app::Completion {
+                        items,
+                        selected: 0,
+                        word_start: comp.word_start,
+                    });
                 }
             }
         }

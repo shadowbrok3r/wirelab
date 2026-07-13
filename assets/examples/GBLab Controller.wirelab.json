@@ -1,0 +1,427 @@
+{
+  "name": "GBLab Controller (BLE pad)",
+  "circuit": {
+    "board_id": "esp32-h2-devkit-n4",
+    "board_pos": [
+      0.0,
+      0.0
+    ],
+    "components": {
+      "1": {
+        "id": 1,
+        "def_id": "push-button",
+        "pos": [
+          55.0,
+          8.0
+        ],
+        "rotation": 0,
+        "label": "Up",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      },
+      "2": {
+        "id": 2,
+        "def_id": "push-button",
+        "pos": [
+          55.0,
+          32.0
+        ],
+        "rotation": 0,
+        "label": "Down",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      },
+      "3": {
+        "id": 3,
+        "def_id": "push-button",
+        "pos": [
+          43.0,
+          20.0
+        ],
+        "rotation": 0,
+        "label": "Left",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      },
+      "4": {
+        "id": 4,
+        "def_id": "push-button",
+        "pos": [
+          67.0,
+          20.0
+        ],
+        "rotation": 0,
+        "label": "Right",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      },
+      "5": {
+        "id": 5,
+        "def_id": "push-button",
+        "pos": [
+          86.0,
+          24.0
+        ],
+        "rotation": 0,
+        "label": "B",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      },
+      "6": {
+        "id": 6,
+        "def_id": "push-button",
+        "pos": [
+          98.0,
+          16.0
+        ],
+        "rotation": 0,
+        "label": "A",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      },
+      "7": {
+        "id": 7,
+        "def_id": "push-button",
+        "pos": [
+          62.0,
+          46.0
+        ],
+        "rotation": 0,
+        "label": "Select",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      },
+      "8": {
+        "id": 8,
+        "def_id": "push-button",
+        "pos": [
+          76.0,
+          46.0
+        ],
+        "rotation": 0,
+        "label": "Start",
+        "props": {},
+        "state": {
+          "kind": "button",
+          "pressed": false
+        }
+      }
+    },
+    "wires": {
+      "9": {
+        "id": 9,
+        "a": {
+          "at": "terminal",
+          "comp": 1,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO0"
+        },
+        "color": [
+          80,
+          160,
+          230
+        ],
+        "waypoints": []
+      },
+      "10": {
+        "id": 10,
+        "a": {
+          "at": "terminal",
+          "comp": 1,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND1"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "11": {
+        "id": 11,
+        "a": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO1"
+        },
+        "color": [
+          80,
+          160,
+          230
+        ],
+        "waypoints": []
+      },
+      "12": {
+        "id": 12,
+        "a": {
+          "at": "terminal",
+          "comp": 2,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND1"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "13": {
+        "id": 13,
+        "a": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO5"
+        },
+        "color": [
+          80,
+          160,
+          230
+        ],
+        "waypoints": []
+      },
+      "14": {
+        "id": 14,
+        "a": {
+          "at": "terminal",
+          "comp": 3,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND1"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "15": {
+        "id": 15,
+        "a": {
+          "at": "terminal",
+          "comp": 4,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO4"
+        },
+        "color": [
+          80,
+          160,
+          230
+        ],
+        "waypoints": []
+      },
+      "16": {
+        "id": 16,
+        "a": {
+          "at": "terminal",
+          "comp": 4,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND1"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "17": {
+        "id": 17,
+        "a": {
+          "at": "terminal",
+          "comp": 5,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO11"
+        },
+        "color": [
+          230,
+          120,
+          60
+        ],
+        "waypoints": []
+      },
+      "18": {
+        "id": 18,
+        "a": {
+          "at": "terminal",
+          "comp": 5,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND4"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "19": {
+        "id": 19,
+        "a": {
+          "at": "terminal",
+          "comp": 6,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO10"
+        },
+        "color": [
+          230,
+          120,
+          60
+        ],
+        "waypoints": []
+      },
+      "20": {
+        "id": 20,
+        "a": {
+          "at": "terminal",
+          "comp": 6,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND4"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "21": {
+        "id": 21,
+        "a": {
+          "at": "terminal",
+          "comp": 7,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO12"
+        },
+        "color": [
+          160,
+          100,
+          220
+        ],
+        "waypoints": []
+      },
+      "22": {
+        "id": 22,
+        "a": {
+          "at": "terminal",
+          "comp": 7,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND5"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      },
+      "23": {
+        "id": 23,
+        "a": {
+          "at": "terminal",
+          "comp": 8,
+          "terminal": "a"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GPIO22"
+        },
+        "color": [
+          160,
+          100,
+          220
+        ],
+        "waypoints": []
+      },
+      "24": {
+        "id": 24,
+        "a": {
+          "at": "terminal",
+          "comp": 8,
+          "terminal": "b"
+        },
+        "b": {
+          "at": "board_pin",
+          "key": "GND5"
+        },
+        "color": [
+          40,
+          40,
+          40
+        ],
+        "waypoints": []
+      }
+    },
+    "next_comp": 9,
+    "next_wire": 25
+  },
+  "program": {
+    "rules": []
+  }
+}

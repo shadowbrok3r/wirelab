@@ -519,8 +519,8 @@ mod i2cbus {
 }
 
 /// Host-configurable secondary UART on arbitrary broken-out pins
-/// (RDM6300 tags, GPS modules, links to other boards...).
-#[cfg(any(feature = "esp32c3", feature = "esp32c5"))]
+/// (RDM6300 tags, GPS modules, LD2450 radar, links to other boards...).
+#[cfg(any(feature = "esp32c3", feature = "esp32c5", feature = "esp32s3"))]
 mod uart1 {
     use esp_hal::Blocking;
     use esp_hal::gpio::{AnyPin, Pin};
@@ -530,6 +530,8 @@ mod uart1 {
         port: Uart<'static, Blocking>,
     }
 
+    // Only the C3/C5-gated peripheral modules borrow pins through here.
+    #[cfg_attr(feature = "esp32s3", allow(dead_code))]
     pub fn steal_pin(n: u8) -> Option<AnyPin<'static>> {
         any_pin(n)
     }
@@ -555,6 +557,18 @@ mod uart1 {
             pick!(0 => GPIO0, 1 => GPIO1, 2 => GPIO2, 3 => GPIO3, 4 => GPIO4,
                   5 => GPIO5, 6 => GPIO6, 7 => GPIO7, 8 => GPIO8, 9 => GPIO9,
                   10 => GPIO10, 18 => GPIO18, 19 => GPIO19, 20 => GPIO20, 21 => GPIO21)
+        }
+        // GPIO19/20 excluded: native USB D-/D+ carry the host link itself.
+        #[cfg(feature = "esp32s3")]
+        {
+            pick!(0 => GPIO0, 1 => GPIO1, 2 => GPIO2, 3 => GPIO3, 4 => GPIO4,
+                  5 => GPIO5, 6 => GPIO6, 7 => GPIO7, 8 => GPIO8, 9 => GPIO9,
+                  10 => GPIO10, 11 => GPIO11, 12 => GPIO12, 13 => GPIO13,
+                  14 => GPIO14, 15 => GPIO15, 16 => GPIO16, 17 => GPIO17,
+                  18 => GPIO18, 21 => GPIO21, 35 => GPIO35, 36 => GPIO36,
+                  37 => GPIO37, 38 => GPIO38, 39 => GPIO39, 40 => GPIO40,
+                  41 => GPIO41, 42 => GPIO42, 43 => GPIO43, 44 => GPIO44,
+                  45 => GPIO45, 46 => GPIO46, 47 => GPIO47, 48 => GPIO48)
         }
     }
 
@@ -591,7 +605,7 @@ mod uart1 {
     }
 }
 
-#[cfg(not(any(feature = "esp32c3", feature = "esp32c5")))]
+#[cfg(not(any(feature = "esp32c3", feature = "esp32c5", feature = "esp32s3")))]
 mod uart1 {
     pub struct Uart1;
 

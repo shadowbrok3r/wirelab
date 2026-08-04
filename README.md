@@ -108,16 +108,19 @@ refused with reasons) / `auto_wire` / `fix_lints` to build, `set_script`
 `set_component_state` + `read_live` to actually press the buttons and watch
 the LEDs. Everything the AI does appears on your canvas in real time.
 
-## Roadmap: radios, buses, displays
+## Buses, radios, displays: what's live
 
-The C5's Wi-Fi/BLE/802.15.4 and the SPI/I2C/UART buses are physically
-there but not yet driven by the firmware — scripts can't reach them until
-it does. The IDE's hardware tree has an info sheet per capability with the
-concrete plan; the short version: **UART1 first** (unlocks the RDM6300 and
-serial modules), **SPI + an ST7735 driver in firmware** next (scripts send
-`lcd.text(...)`-style commands; pixels never cross the serial link), then
-**esp-wifi** — whose first payoff is the WireLab link itself over TCP with
-mDNS discovery, which is also the doorway to editing from an iPad.
+UART1, SPI, I2C, the ST7735 display path, and Wi-Fi (TCP link + UDP
+discovery) all shipped in firmware — the in-app hardware tree's info
+sheets track per-chip availability. UART1 runs on any broken-out pins on
+C3, C5, and S3, with binary-clean RX via `on_uart_bytes(bytes)` alongside
+line-based `on_uart(line)` — proven against an HLK-LD2450 radar's framed
+256000-baud protocol on an ESP32-S3 (see
+`crates/wirelab-link/examples/uart_probe.rs` for first-contact bring-up
+of any serial sensor). SPI/I2C/ADC/RGB remain C3/C5-only for now; S3 and
+classic ESP32 answer those with `Unsupported`. Xtensa targets (S3,
+classic) build with the espup toolchain:
+`cargo +esp build --no-default-features --features esp32s3 --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc`.
 
 ## Component scripts
 

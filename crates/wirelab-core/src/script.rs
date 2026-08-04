@@ -812,6 +812,13 @@ impl ScriptHost {
         self.call(comp, "on_uart", vec![Dynamic::from(line.to_string())])
     }
 
+    /// Raw UART bytes as received, before line assembly — for binary
+    /// protocols (framed radar packets, checksummed sensor bursts).
+    pub fn on_uart_bytes(&mut self, comp: CompId, data: &[u8]) -> Vec<Action> {
+        let arr: rhai::Array = data.iter().map(|b| Dynamic::from(i64::from(*b))).collect();
+        self.call(comp, "on_uart_bytes", vec![Dynamic::from(arr)])
+    }
+
     /// SPI transfer completed; `data` is what the peripheral clocked back.
     pub fn on_spi(&mut self, comp: CompId, data: &[u8]) -> Vec<Action> {
         let arr: rhai::Array = data.iter().map(|b| Dynamic::from(i64::from(*b))).collect();

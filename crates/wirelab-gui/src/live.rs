@@ -489,6 +489,9 @@ impl LiveState {
                     }
                 }
                 DeviceMsg::UartData { data } => {
+                    for comp in self.scripts.scripted() {
+                        script_actions.extend(self.scripts.on_uart_bytes(comp, data));
+                    }
                     self.uart_buf.push_str(&String::from_utf8_lossy(data));
                     while let Some(nl) = self.uart_buf.find('\n') {
                         let line: String =

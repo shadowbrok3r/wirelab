@@ -12,13 +12,26 @@ use wirelab_link::Device;
 use wirelab_link::serial::{DEFAULT_BAUD, SerialDevice};
 use wirelab_proto::{DeviceMsg, HostMsg, PROTO_VERSION};
 
+/// Parse an optional positional arg; absent uses the default, malformed errors
+/// out (a typo'd pin probing the wrong GPIO would look like dead wiring).
+fn parse_arg<T: std::str::FromStr>(
+    args: &mut impl Iterator<Item = String>,
+    name: &str,
+    default: T,
+) -> Result<T, String> {
+    match args.next() {
+        None => Ok(default),
+        Some(s) => s.parse().map_err(|_| format!("invalid {name}: {s:?}")),
+    }
+}
+
 fn main() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let port = args.next().unwrap_or_else(|| "/dev/ttyACM0".into());
-    let tx: u8 = args.next().and_then(|s| s.parse().ok()).unwrap_or(18);
-    let rx: u8 = args.next().and_then(|s| s.parse().ok()).unwrap_or(17);
-    let baud: u32 = args.next().and_then(|s| s.parse().ok()).unwrap_or(256_000);
-    let secs: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(6);
+    let tx: u8 = parse_arg(&mut args, "tx pin", 18)?;
+    let rx: u8 = parse_arg(&mut args, "rx pin", 17)?;
+    let baud: u32 = parse_arg(&mut args, "baud", 256_000)?;
+    let secs: u64 = parse_arg(&mut args, "seconds", 6)?;
 
     println!("opening {port} @ {DEFAULT_BAUD}...");
     let mut dev = SerialDevice::open(&port, DEFAULT_BAUD).map_err(|e| e.to_string())?;

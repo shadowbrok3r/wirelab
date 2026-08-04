@@ -119,7 +119,7 @@ line-based `on_uart(line)` — proven against an HLK-LD2450 radar's framed
 `crates/wirelab-link/examples/uart_probe.rs` for first-contact bring-up
 of any serial sensor). SPI/I2C/ADC/RGB remain C3/C5-only for now; S3 and
 classic ESP32 answer those with `Unsupported`. Xtensa targets (S3,
-classic) build with the espup toolchain:
+classic) build with the espup toolchain, from `firmware/wirelab-fw`:
 `cargo +esp build --no-default-features --features esp32s3 --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc`.
 
 ## Component scripts

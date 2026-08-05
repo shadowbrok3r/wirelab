@@ -161,14 +161,14 @@ impl Project {
 
     pub fn load(path: &Path) -> std::io::Result<Project> {
         let text = std::fs::read_to_string(path)?;
-        let saved: SavedProject = serde_json::from_str(&text)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        Ok(Project::from_saved(saved))
+        Project::from_json(&text)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
-    #[cfg(test)]
-    fn from_saved_pub(saved_json: &str) -> Project {
-        Project::from_saved(serde_json::from_str(saved_json).unwrap())
+    /// Parse the on-disk JSON shape, also used as the wire shape by remote
+    /// project pushes.
+    pub fn from_json(text: &str) -> Result<Project, serde_json::Error> {
+        Ok(Project::from_saved(serde_json::from_str(text)?))
     }
 
     fn from_saved(saved: SavedProject) -> Project {
@@ -218,7 +218,7 @@ mod tests {
         // A pre-multi-board file: flat circuit, no `boards`.
         let json = r#"{"name":"old","circuit":{"board_id":"esp32-c3-devkitc-02",
             "board_pos":[0.0,0.0],"components":{},"wires":{},"next_comp":1,"next_wire":1}}"#;
-        let p = Project::from_saved_pub(json);
+        let p = Project::from_json(json).unwrap();
         assert_eq!(p.boards.len(), 1);
         assert_eq!(p.active, 0);
         assert_eq!(p.circuit.board_id, "esp32-c3-devkitc-02");
@@ -272,7 +272,7 @@ mod tests {
         // Legacy files (id 0) get unique ids assigned on load.
         let json = r#"{"name":"old","circuit":{"board_id":"esp32-c3-devkitc-02",
             "board_pos":[0.0,0.0],"components":{},"wires":{},"next_comp":1,"next_wire":1}}"#;
-        let q = Project::from_saved_pub(json);
+        let q = Project::from_json(json).unwrap();
         assert!(q.boards[0].id != 0);
     }
 

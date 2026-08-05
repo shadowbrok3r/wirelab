@@ -18,8 +18,10 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde_json::{Value, json};
 use wirelab_core::circuit::{CompId, Endpoint, PlacedComponent, WireId};
 use wirelab_core::component::CompState;
+use wirelab_core::edit::{EditOp, apply_edit};
 use wirelab_core::flow::FlowGraph;
 use wirelab_core::netlist::{Netlist, WireVerdict, wire_verdict};
+use wirelab_core::project::Project;
 use wirelab_core::validate::{LintFix, Severity, validate};
 
 use crate::app::WireLabApp;
@@ -60,23 +62,9 @@ pub enum Cmd {
     EditBoard { board_id: u64, op: EditOp },
     /// Remote script edit on any board: sets the component's script and lints it.
     SetBoardScript { board_id: u64, comp: u32, source: String },
-}
-
-/// One remote structural edit, board-addressed. Endpoints use the same
-/// serde shape as project files: `{"at":"board_pin","key":"GPIO2"}` /
-/// `{"at":"terminal","comp":1,"terminal":"anode"}`.
-#[derive(Debug, serde::Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum EditOp {
-    AddComp {
-        def_id: String,
-        pos: [f32; 2],
-        #[serde(default)]
-        label: String,
-    },
-    RemoveComp { comp: u32 },
-    AddWire { a: wirelab_core::circuit::Endpoint, b: wirelab_core::circuit::Endpoint },
-    RemoveWire { wire: u32 },
+    /// Whole project pushed from a remote editor; parked as a pending import
+    /// until the desktop user accepts it. Never applied by the network alone.
+    ImportProject { project: Project, from: Option<String> },
 }
 
 /// Parse a remote structural-edit body: `{board_id, op, ...}`.
@@ -122,77 +110,21 @@ pub fn parse_move_push(body: &str) -> Result<Cmd, String> {
     Ok(Cmd::MoveComponents { board_id, moves })
 }
 
-/// Apply one structural edit to a circuit, with the same electrical-safety
-/// verdict the desktop and MCP enforce.
-fn apply_edit(
-    circuit: &mut wirelab_core::circuit::Circuit,
-    lib: &wirelab_core::library::Library,
-    live_output_gpios: &[u8],
-    op: EditOp,
-) -> Result<Value, String> {
-    use wirelab_core::circuit::{CompId, Endpoint, PlacedComponent, WireId};
-    use wirelab_core::component::CompState;
-    use wirelab_core::netlist::{Netlist, WireVerdict, wire_verdict};
-    match op {
-        EditOp::AddComp { def_id, pos, label } => {
-            let def = lib
-                .component(&def_id)
-                .ok_or_else(|| format!("unknown component '{def_id}'"))?
-                .clone();
-            let id = circuit.add_component(PlacedComponent {
-                id: CompId(0),
-                def_id,
-                pos: [pos[0].round(), pos[1].round()],
-                rotation: 0,
-                label,
-                props: Default::default(),
-                state: CompState::initial(&def.sim),
-                script: None,
-            });
-            Ok(serde_json::json!({ "ok": true, "comp": id.0 }))
-        }
-        EditOp::RemoveComp { comp } => {
-            let id = CompId(comp);
-            if !circuit.components.contains_key(&id) {
-                return Err(format!("no component {comp}"));
-            }
-            circuit.remove_component(id);
-            Ok(serde_json::json!({ "ok": true, "removed": comp }))
-        }
-        EditOp::AddWire { a, b } => {
-            let board = lib.board(&circuit.board_id).ok_or("no board profile")?;
-            // Reject dangling endpoints so a malformed client can't wire to a
-            // pin or terminal that doesn't exist on this board/component.
-            let valid = |ep: &Endpoint| match ep {
-                Endpoint::BoardPin { key } => board.pins.iter().any(|p| &p.key == key),
-                Endpoint::Terminal { comp, terminal } => circuit
-                    .components
-                    .get(comp)
-                    .and_then(|c| lib.component(&c.def_id))
-                    .is_some_and(|d| d.terminals.iter().any(|t| &t.id == terminal)),
-            };
-            if !valid(&a) || !valid(&b) {
-                return Err("wire references an endpoint that doesn't exist".into());
-            }
-            let nl = Netlist::build(circuit, board, lib);
-            match wire_verdict(&nl, board, &a, &b, live_output_gpios) {
-                WireVerdict::Blocked(why) => Err(format!("refused: {why}")),
-                WireVerdict::Redundant => Err("those points are already connected".into()),
-                WireVerdict::Ok => {
-                    let id = circuit.add_wire(a, b, [190, 120, 255]);
-                    Ok(serde_json::json!({ "ok": true, "wire": id.0 }))
-                }
-            }
-        }
-        EditOp::RemoveWire { wire } => {
-            let id = WireId(wire);
-            if !circuit.wires.contains_key(&id) {
-                return Err(format!("no wire {wire}"));
-            }
-            circuit.remove_wire(id);
-            Ok(serde_json::json!({ "ok": true, "removed": wire }))
-        }
+/// Parse a whole-project import body: the project-file shape
+/// `{name, active, boards}`, plus an optional `from` naming the sender.
+/// At least one board is required — an import must never wipe the desktop's
+/// project with an empty one.
+pub fn parse_import_push(body: &str) -> Result<Cmd, String> {
+    let v: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    if !v.get("name").is_some_and(Value::is_string) {
+        return Err("missing name".into());
     }
+    if !v.get("boards").and_then(Value::as_array).is_some_and(|b| !b.is_empty()) {
+        return Err("missing boards".into());
+    }
+    let from = v.get("from").and_then(Value::as_str).map(str::to_string);
+    let project = Project::from_json(body).map_err(|e| format!("bad project: {e}"))?;
+    Ok(Cmd::ImportProject { project, from })
 }
 
 /// Auto-discovery beacon payload: `WIRELAB-HOST <view_port> <hostname>`.
@@ -309,7 +241,8 @@ impl McpServer {
                     let flow_ask = ask_ui.clone();
                     let edit_ask = ask_ui.clone();
                     let script_ask = ask_ui.clone();
-                    let move_ask = ask_ui;
+                    let move_ask = ask_ui.clone();
+                    let import_ask = ask_ui;
                     let view_router = axum::Router::new()
                         .route(
                             "/project",
@@ -350,6 +283,18 @@ impl McpServer {
                             axum::routing::post(move |body: String| async move {
                                 match parse_move_push(&body) {
                                     Ok(cmd) => move_ask(cmd).await,
+                                    Err(e) => serde_json::json!({ "ok": false, "error": e })
+                                        .to_string(),
+                                }
+                            }),
+                        )
+                        // Queues the project for confirmation; the reply says
+                        // "pending", never "applied".
+                        .route(
+                            "/project/import",
+                            axum::routing::post(move |body: String| async move {
+                                match parse_import_push(&body) {
+                                    Ok(cmd) => import_ask(cmd).await,
                                     Err(e) => serde_json::json!({ "ok": false, "error": e })
                                         .to_string(),
                                 }
@@ -1270,6 +1215,24 @@ impl WireLabApp {
                 }
                 Ok(serde_json::json!({ "ok": true, "moved": n }))
             }
+            Cmd::ImportProject { project, from } => {
+                let name = project.name.clone();
+                let boards = project.boards.len();
+                let who = from.clone().unwrap_or_else(|| "a remote editor".to_string());
+                // Parked only — the confirm modal is what replaces the project.
+                if let Err(e) = self.import.park(project, from) {
+                    self.console.push(format!(
+                        "refused '{name}' from {who} — an earlier import is still on screen"
+                    ));
+                    return Err(e);
+                }
+                self.console.push(format!(
+                    "{who} sent the project '{name}' — accept or decline it in WireLab"
+                ));
+                Ok(serde_json::json!({
+                    "ok": true, "pending": true, "name": name, "boards": boards,
+                }))
+            }
             Cmd::GetFlow => {
                 let graph = serde_json::to_value(&self.project.flow).map_err(|e| e.to_string())?;
                 let (code, errors) = match wirelab_core::flow::compile(&self.project.flow) {
@@ -1445,6 +1408,34 @@ mod tests {
         assert!(parse_script_push(r#"{"comp":2,"source":"x"}"#).is_err());
         assert!(parse_script_push(r#"{"board_id":1,"source":"x"}"#).is_err());
         assert!(parse_script_push(r#"{"board_id":1,"comp":2}"#).is_err());
+    }
+
+    #[test]
+    fn import_push_needs_a_named_project_with_boards() {
+        let board = serde_json::json!({
+            "id": 4, "name": "Board 1",
+            "circuit": { "board_id": "esp32-c5-devkitc-1", "board_pos": [0.0, 0.0],
+                "components": {}, "wires": {}, "next_comp": 1, "next_wire": 1 },
+        });
+        let body =
+            serde_json::json!({ "name": "phone lab", "active": 0, "boards": [board.clone()],
+                "from": "Logan's phone" });
+        match parse_import_push(&body.to_string()).unwrap() {
+            Cmd::ImportProject { project, from } => {
+                assert_eq!(project.name, "phone lab");
+                assert_eq!(project.boards.len(), 1);
+                assert_eq!(project.circuit.board_id, "esp32-c5-devkitc-1");
+                assert_eq!(from.as_deref(), Some("Logan's phone"));
+            }
+            _ => panic!(),
+        }
+        // A blank or boardless body must never stand in for a project.
+        assert!(parse_import_push(r#"{"name":"empty","boards":[]}"#).is_err());
+        assert!(parse_import_push(r#"{"name":"empty"}"#).is_err());
+        assert!(
+            parse_import_push(&serde_json::json!({ "boards": [board] }).to_string()).is_err()
+        );
+        assert!(parse_import_push("not json").is_err());
     }
 
     #[test]

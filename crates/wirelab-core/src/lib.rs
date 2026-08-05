@@ -4,6 +4,7 @@ pub mod autowire;
 pub mod board;
 pub mod circuit;
 pub mod component;
+pub mod edit;
 pub mod engine;
 pub mod flow;
 pub mod geometry;

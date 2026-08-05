@@ -190,6 +190,76 @@ impl BackgroundBoard {
     }
 }
 
+/// A project pushed over the LAN, held until the user accepts or declines it.
+/// The listener is unauthenticated, so nothing here reaches `project` without
+/// a click.
+pub struct PendingImport {
+    project: Project,
+    /// What the sender called itself, if it said.
+    from: Option<String>,
+    /// Identifies this payload against the summary the modal drew from it.
+    id: u64,
+    /// Set once the modal has drawn this payload.
+    shown: bool,
+}
+
+impl PendingImport {
+    pub fn project(&self) -> &Project {
+        &self.project
+    }
+    pub fn from(&self) -> Option<&str> {
+        self.from.as_deref()
+    }
+    pub fn into_project(self) -> Project {
+        self.project
+    }
+}
+
+/// Holds at most one pushed project. Once the modal draws a payload it is
+/// locked: further pushes are refused rather than swapping out the project the
+/// user is being asked about, and only the drawn payload can be adopted.
+#[derive(Default)]
+pub struct ImportGate {
+    pending: Option<PendingImport>,
+    next_id: u64,
+}
+
+impl ImportGate {
+    /// Parks a pushed project; errs while a drawn payload awaits a decision.
+    pub fn park(&mut self, project: Project, from: Option<String>) -> Result<(), String> {
+        if let Some(p) = &self.pending
+            && p.shown
+        {
+            return Err(format!(
+                "'{}' is already awaiting a decision in WireLab — retry once it is accepted or declined",
+                p.project.name
+            ));
+        }
+        self.next_id += 1;
+        self.pending = Some(PendingImport { project, from, id: self.next_id, shown: false });
+        Ok(())
+    }
+
+    /// Marks the pending payload as drawn and returns its id.
+    pub fn lock_shown(&mut self) -> Option<u64> {
+        let p = self.pending.as_mut()?;
+        p.shown = true;
+        Some(p.id)
+    }
+
+    pub fn pending(&self) -> Option<&PendingImport> {
+        self.pending.as_ref()
+    }
+
+    /// Removes the pending payload only when it is the one identified by `id`.
+    pub fn take(&mut self, id: u64) -> Option<PendingImport> {
+        match &self.pending {
+            Some(p) if p.id == id => self.pending.take(),
+            _ => None,
+        }
+    }
+}
+
 pub struct WireLabApp {
     pub lib: Library,
     pub boards_dir: PathBuf,
@@ -227,6 +297,8 @@ pub struct WireLabApp {
     pub flash: crate::flash::FlashState,
     /// Embedded MCP server for AI circuit assistance.
     pub mcp: Option<crate::mcp::McpServer>,
+    /// Project pushed by a remote editor, awaiting the confirm modal.
+    pub import: ImportGate,
     /// Components to spotlight this frame (hovered warning in Checks).
     pub hover_highlight: Vec<CompId>,
     pub wiring_open: bool,
@@ -377,6 +449,7 @@ impl WireLabApp {
             examples,
             flash: crate::flash::FlashState::default(),
             mcp,
+            import: ImportGate::default(),
             hover_highlight: Vec::new(),
             wiring_open: false,
             wiring_filter: String::new(),
@@ -492,22 +565,28 @@ impl WireLabApp {
     pub(crate) fn load_project_path(&mut self, path: &std::path::Path, remember_path: bool) {
         match Project::load(path) {
             Ok(project) => {
-                self.live.disconnect(&mut self.console);
-                for (_, mut bb) in self.background.drain() {
-                    bb.live.disconnect(&mut self.console);
-                }
-                self.project = project;
-                self.project_path = remember_path.then(|| path.to_path_buf());
-                self.selection = Selection::None;
-                self.script_ed = crate::app::ScriptEditor::default();
-                self.topo_rev += 1;
-                self.state_rev += 1;
-                self.script_rev += 1;
-                self.flow_rev += 1;
+                self.adopt_project(project, remember_path.then(|| path.to_path_buf()));
                 self.log(format!("opened {}", path.display()));
             }
             Err(e) => self.log(format!("open failed: {e}")),
         }
+    }
+
+    /// Replace the open project: drop every live session and reset the derived
+    /// state. `path` is the file Save writes back to; `None` leaves it unsaved.
+    pub(crate) fn adopt_project(&mut self, project: Project, path: Option<PathBuf>) {
+        self.live.disconnect(&mut self.console);
+        for (_, mut bb) in self.background.drain() {
+            bb.live.disconnect(&mut self.console);
+        }
+        self.project = project;
+        self.project_path = path;
+        self.selection = Selection::None;
+        self.script_ed = crate::app::ScriptEditor::default();
+        self.topo_rev += 1;
+        self.state_rev += 1;
+        self.script_rev += 1;
+        self.flow_rev += 1;
     }
 
     /// Park the active board's live session (still ticking) with everything a
@@ -888,6 +967,73 @@ impl WireLabApp {
             self.ai.open = false;
         }
     }
+
+    /// Confirm-before-replace gate for a project pushed over the LAN.
+    fn show_import_modal(&mut self, ctx: &egui::Context) {
+        let Some(shown_id) = self.import.lock_shown() else { return };
+        let pending = self.import.pending().expect("locked payload is present");
+        let who = pending.from().unwrap_or("a device on your network").to_string();
+        let incoming = pending.project().name.clone();
+        let boards: Vec<String> = pending
+            .project()
+            .boards
+            .iter()
+            .map(|b| {
+                format!(
+                    "• {} — {} parts, {} wires",
+                    b.name,
+                    b.circuit.components.len(),
+                    b.circuit.wires.len()
+                )
+            })
+            .collect();
+        let current = self.project.name.clone();
+        let current_path = self.project_path.clone();
+        let mut accept = false;
+        let mut decline = false;
+        egui::Modal::new(egui::Id::new("incoming-project")).show(ctx, |ui| {
+            ui.set_width(430.0);
+            ui.label(RichText::new("Incoming project").strong().size(16.0));
+            ui.label(format!("'{incoming}' was sent by {who}."));
+            ui.add_space(4.0);
+            for line in &boards {
+                ui.label(RichText::new(line).small());
+            }
+            ui.separator();
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                format!("⚠ This replaces '{current}'. Unsaved work in it is lost."),
+            );
+            if let Some(path) = &current_path {
+                ui.label(RichText::new(format!("current file: {}", path.display())).small().weak());
+            }
+            ui.label(
+                RichText::new("The imported project arrives unsaved — use Save as… to write it to disk.")
+                    .small()
+                    .weak(),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Decline").clicked() {
+                    decline = true;
+                }
+                if ui.button(RichText::new("Replace project").strong()).clicked() {
+                    accept = true;
+                }
+            });
+        });
+        // Keyed on shown_id: only the payload this summary was drawn from lands.
+        if accept && let Some(pending) = self.import.take(shown_id) {
+            let project = pending.into_project();
+            let name = project.name.clone();
+            // No path: the phone can never overwrite a file on disk.
+            self.adopt_project(project, None);
+            self.log(format!("imported '{name}' from {who} — unsaved, use Save as…"));
+        } else if decline {
+            self.import.take(shown_id);
+            self.log(format!("declined the project '{incoming}' from {who}"));
+        }
+    }
 }
 
 impl eframe::App for WireLabApp {
@@ -1029,6 +1175,7 @@ impl eframe::App for WireLabApp {
         egui::CentralPanel::no_frame().show(ui, |ui| self.show_canvas(ui));
 
         self.show_ai_window(&ctx);
+        self.show_import_modal(&ctx);
         crate::rhai_docs::show_docs_window(&ctx, &mut self.docs_open, &mut self.docs_filter);
         crate::wiring_guide::show_wiring_window(&ctx, &mut self.wiring_open, &mut self.wiring_filter);
 
@@ -1052,6 +1199,46 @@ impl eframe::App for WireLabApp {
 
 #[cfg(test)]
 mod tests {
+    use super::ImportGate;
+    use wirelab_core::project::Project;
+
+    /// The modal's exact sequence: draw the pending payload, then adopt by id.
+    #[test]
+    fn a_push_cannot_swap_the_payload_under_a_modal_on_screen() {
+        let mut gate = ImportGate::default();
+        gate.park(Project::new("A", "esp32-c3-devkitm-1"), Some("phone".into())).unwrap();
+
+        // The modal draws A's summary.
+        let shown = gate.lock_shown().unwrap();
+        assert_eq!(gate.pending().unwrap().project().name, "A");
+
+        // B arrives while the user is reading A.
+        let err = gate
+            .park(Project::new("B", "esp32-c3-devkitm-1"), Some("phone".into()))
+            .unwrap_err();
+        assert!(err.contains("'A'"), "the refusal names the held project: {err}");
+        assert_eq!(gate.pending().unwrap().project().name, "A", "B did not displace A");
+
+        // The click adopts the project whose summary was shown.
+        let adopted = gate.take(shown).unwrap();
+        assert_eq!(adopted.into_project().name, "A");
+        assert!(gate.pending().is_none());
+
+        // A stale id adopts nothing.
+        gate.park(Project::new("C", "esp32-c3-devkitm-1"), None).unwrap();
+        assert!(gate.take(shown).is_none());
+        assert_eq!(gate.pending().unwrap().project().name, "C");
+    }
+
+    /// A payload not yet drawn is replaceable; the user has seen no summary.
+    #[test]
+    fn an_undrawn_push_is_replaced_not_refused() {
+        let mut gate = ImportGate::default();
+        gate.park(Project::new("A", "esp32-c3-devkitm-1"), None).unwrap();
+        gate.park(Project::new("B", "esp32-c3-devkitm-1"), None).unwrap();
+        assert_eq!(gate.pending().unwrap().project().name, "B");
+    }
+
     #[test]
     fn shipped_theme_deserializes() {
         let path = super::find_assets_dir().join("theme.json");

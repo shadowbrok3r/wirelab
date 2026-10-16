@@ -38,16 +38,17 @@ log = "0.4.33"
 env_logger = "0.11.11"
 crossbeam-channel = "0.5.15"
 serialport = { version = "4.9.0", default-features = false }
-egui = { version = "0.35.0", features = ["serde"] }
-eframe = { version = "0.35.0", default-features = false, features = [
+egui = { version = "0.37.0", features = ["serde", "monochrome_emoji_fonts"] }
+eframe = { version = "0.37.0", default-features = false, features = [
+    "clipboard",
     "default_fonts",
     "glow",
     "persistence",
     "wayland",
     "x11",
 ] }
-egui_extras = { version = "0.35.0", features = ["serde"] }
-egui-phosphor = "0.12.0"
+egui_extras = { version = "0.37.0", features = ["serde"] }
+egui-phosphor = "0.14.0"
 egui-snarl = { version = "0.11.0", features = ["serde"] }
 rfd = "0.17.2"
 ureq = { version = "3.3.0", features = ["json"] }
@@ -58,8 +59,11 @@ schemars = "1"
 directories = "6.0.0"
 
 [patch.crates-io]
-# egui 0.35-compatible phosphor icons (upstream lags behind egui releases).
-egui-phosphor = { git = "https://github.com/shadowbrok3r/egui-phosphor", branch = "egui-035" }
+# egui 0.37-compatible phosphor icons (upstream lags behind egui releases).
+egui-phosphor = { git = "https://github.com/shadowbrok3r/egui-phosphor", branch = "egui-037" }
+# Vendored egui 0.37 copies of the flow editor's snarl stack.
+egui-snarl = { path = "patches/egui-snarl" }
+egui-scale = { path = "patches/egui-scale" }
 
 [profile.release]
 lto = "thin"

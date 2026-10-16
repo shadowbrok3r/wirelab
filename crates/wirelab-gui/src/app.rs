@@ -991,7 +991,7 @@ impl WireLabApp {
         let current_path = self.project_path.clone();
         let mut accept = false;
         let mut decline = false;
-        egui::Modal::new(egui::Id::new("incoming-project")).show(ctx, |ui| {
+        egui::Modal::new(egui::Id::unique("incoming-project")).show(ctx, |ui| {
             ui.set_width(430.0);
             ui.label(RichText::new("Incoming project").strong().size(16.0));
             ui.label(format!("'{incoming}' was sent by {who}."));

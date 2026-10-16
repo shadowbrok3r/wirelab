@@ -684,7 +684,7 @@ impl WireLabApp {
         }
 
         // Enter keeps indentation; consumed pre-editor.
-        let editor_id = egui::Id::new("wirelab-script-editor");
+        let editor_id = egui::Id::unique("wirelab-script-editor");
         let mut auto_indent = false;
         if self.script_ed.completion.is_none() && ui.ctx().memory(|m| m.has_focus(editor_id)) {
             ui.input_mut(|i| {

@@ -1,6 +1,7 @@
 //! Side panels: palette, inspector, program editor, console, device bar.
 
-use egui::{Color32, ComboBox, DragValue, RichText, ScrollArea};
+use egui::collapsing_header::CollapsingState;
+use egui::{Color32, ComboBox, DragValue, IdSalt, RichText, ScrollArea, Sense, Vec2};
 use wirelab_core::circuit::CompId;
 use wirelab_core::component::{CompState, SimModel};
 use wirelab_core::program::{Action, Rule, Trigger};
@@ -12,9 +13,18 @@ use wirelab_proto::WifiState;
 use crate::app::{Selection, WireLabApp};
 use crate::live::Backend;
 
+/// Side of a part icon in the components list.
+const PART_ICON: f32 = 20.0;
+
 impl WireLabApp {
     pub fn show_palette(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Board");
+        ui.horizontal(|ui| {
+            if let Some(board) = self.lib.board(&self.project.circuit.board_id) {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                crate::icons::paint_plain(ui, rect, crate::icons::board(board));
+            }
+            ui.heading("Board");
+        });
         let current = self.project.circuit.board_id.clone();
         let mut chosen = current.clone();
         ComboBox::from_id_salt("board-pick")
@@ -108,21 +118,33 @@ impl WireLabApp {
         ScrollArea::vertical().id_salt("palette").show(ui, |ui| {
             for cat in categories {
                 let n = self.lib.components.values().filter(|c| c.category == cat).count();
-                egui::CollapsingHeader::new(
-                    RichText::new(format!("{cat} ({n})")).strong(),
-                )
-                .default_open(true)
-                .show(ui, |ui| {
+                let id = ui.make_persistent_id(("palette-category", &cat));
+                CollapsingState::load_with_default_open(ui.ctx(), id, true)
+                    .show_header(ui, |ui| {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                        crate::icons::paint_plain(ui, rect, crate::icons::category(&cat));
+                        ui.label(RichText::new(format!("{cat} ({n})")).strong());
+                    })
+                    .body(|ui| {
                     for def in self.lib.components.values().filter(|c| c.category == cat) {
                         let active = self.canvas.placing.as_deref() == Some(def.id.as_str());
+                        let icon = IdSalt::new(&def.id);
                         // Trailing grow-atom pushes the label to the left edge.
-                        let btn = ui.add_sized(
-                            [ui.available_width() - 8.0, 22.0],
-                            egui::Button::selectable(
-                                active,
-                                (RichText::new(&def.name), egui::Atom::grow()),
+                        let button = egui::Button::selectable(
+                            active,
+                            (
+                                egui::Atom::custom(icon, Vec2::splat(PART_ICON)),
+                                RichText::new(&def.name),
+                                egui::Atom::grow(),
                             ),
                         );
+                        let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
+                        let size = egui::vec2(ui.available_width() - 8.0, PART_ICON + 6.0);
+                        let atoms = ui.allocate_ui_with_layout(size, layout, |ui| button.atom_ui(ui)).inner;
+                        if let Some(rect) = atoms.rect(icon) {
+                            crate::icons::paint_part(ui, rect, def);
+                        }
+                        let btn = atoms.response;
                         if btn.clicked() {
                             self.canvas.placing =
                                 if active { None } else { Some(def.id.clone()) };
@@ -393,7 +415,11 @@ impl WireLabApp {
         let gpio = self.cache.bindings.gpio_of(id);
         let Some(comp) = self.project.circuit.components.get_mut(&id) else { return };
 
-        ui.label(RichText::new(&def.name).strong());
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+            crate::icons::paint_part(ui, rect, &def);
+            ui.label(RichText::new(&def.name).strong());
+        });
         if !def.description.is_empty() {
             ui.label(
                 RichText::new(&def.description).small().color(Color32::from_gray(160)),

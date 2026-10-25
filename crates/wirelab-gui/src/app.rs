@@ -333,6 +333,7 @@ impl WireLabApp {
     pub fn new(cc: &eframe::CreationContext<'_>, chrome: Chrome) -> Self {
         let assets = find_assets_dir();
         let (theme, mut theme_note) = ThemeState::new(cc, &assets.join("theme.json"));
+        egui_icon_pack::install(&cc.egui_ctx);
         theme_note.truncate(120);
         let boards_dir = assets.join("boards");
         let (lib, mut console) =
@@ -801,6 +802,10 @@ impl WireLabApp {
                 self.theme.picker.open = true;
                 ui.close();
             }
+            if ui.button("Icon gallery").on_hover_text("browse the part, category and board icons").clicked() {
+                egui_icon_pack::gallery::toggle(ui.ctx());
+                ui.close();
+            }
         });
         ui.separator();
         ui.label("project");
@@ -1173,6 +1178,7 @@ impl eframe::App for WireLabApp {
         }
 
         self.theme.show(&ctx);
+        egui_icon_pack::gallery::show_window(&ctx, &crate::icons::PACK);
         if let Some(e) = chrome::take_save_error(&ctx) {
             self.log(format!("couldn't save the title bar setting: {e}"));
         }

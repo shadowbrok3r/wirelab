@@ -9,6 +9,9 @@ description = "WireLab desktop app: live ESP32 circuit builder and IDE"
 name = "wirelab"
 path = "src/main.rs"
 
+[build-dependencies]
+egui-icon-pack-build = { workspace = true }
+
 [dependencies]
 wirelab-proto = { workspace = true }
 wirelab-core = { workspace = true }
@@ -19,6 +22,7 @@ eframe = { workspace = true }
 egui_extras = { workspace = true }
 egui-phosphor = { workspace = true }
 egui-theme-kit = { workspace = true }
+egui-icon-pack = { workspace = true }
 egui-snarl = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

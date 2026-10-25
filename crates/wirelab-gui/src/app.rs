@@ -3,6 +3,9 @@
 use std::path::PathBuf;
 
 use egui::{Color32, RichText};
+use egui_theme_kit::chrome::{self, Chrome};
+use egui_theme_kit::controls::Icon;
+use egui_theme_kit::title_bar::{Side, TitleBar, window_edges};
 use wirelab_core::circuit::{CompId, WireId};
 use wirelab_core::engine::{Bindings, plan_setup};
 use wirelab_core::library::Library;
@@ -13,6 +16,7 @@ use wirelab_core::validate::{Lint, validate};
 use crate::ai_import::{AiImportState, save_profile};
 use crate::canvas::CanvasState;
 use crate::live::LiveState;
+use crate::theme::ThemeState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -304,6 +308,9 @@ pub struct WireLabApp {
     pub wiring_open: bool,
     pub wiring_filter: String,
     pub cache: ModelCache,
+    /// Custom title bar (frameless) or the system one.
+    pub chrome: Chrome,
+    pub theme: ThemeState,
 }
 
 fn find_assets_dir() -> PathBuf {
@@ -322,51 +329,10 @@ fn find_assets_dir() -> PathBuf {
     PathBuf::from("assets")
 }
 
-/// Load a serialized `egui::Style` (e.g. an exported color scheme).
-///
-/// The file is deep-merged over `Style::default()` so exports from slightly
-/// older or newer egui versions still apply.
-fn load_theme(path: &std::path::Path) -> Result<egui::Style, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let user: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    let mut base = serde_json::to_value(egui::Style::default()).map_err(|e| e.to_string())?;
-    merge_json(&mut base, user);
-    serde_json::from_value(base).map_err(|e| e.to_string())
-}
-
-fn merge_json(base: &mut serde_json::Value, over: serde_json::Value) {
-    match (base, over) {
-        (serde_json::Value::Object(b), serde_json::Value::Object(o)) => {
-            for (k, v) in o {
-                match b.get_mut(&k) {
-                    Some(slot) => merge_json(slot, v),
-                    None => {
-                        b.insert(k, v);
-                    }
-                }
-            }
-        }
-        (b, v) => *b = v,
-    }
-}
-
 impl WireLabApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut fonts = egui::FontDefinitions::default();
-        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        cc.egui_ctx.set_fonts(fonts);
+    pub fn new(cc: &eframe::CreationContext<'_>, chrome: Chrome) -> Self {
         let assets = find_assets_dir();
-        let mut theme_note = match load_theme(&assets.join("theme.json")) {
-            Ok(style) => {
-                cc.egui_ctx.set_theme(egui::Theme::Dark);
-                cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
-                "theme loaded: assets/theme.json".to_string()
-            }
-            Err(e) => {
-                cc.egui_ctx.set_visuals(egui::Visuals::dark());
-                format!("theme.json not applied ({e}); using default dark")
-            }
-        };
+        let (theme, mut theme_note) = ThemeState::new(cc, &assets.join("theme.json"));
         theme_note.truncate(120);
         let boards_dir = assets.join("boards");
         let (lib, mut console) =
@@ -454,6 +420,8 @@ impl WireLabApp {
             wiring_open: false,
             wiring_filter: String::new(),
             cache: ModelCache::default(),
+            chrome,
+            theme,
         }
     }
 
@@ -754,87 +722,100 @@ impl WireLabApp {
         });
     }
 
-    fn show_toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("WireLab").strong().size(17.0));
-            ui.separator();
-            ui.menu_button("File", |ui| {
-                if ui.button("New").clicked() {
-                    self.live.disconnect(&mut self.console);
-                    for (_, mut bb) in self.background.drain() {
-                        bb.live.disconnect(&mut self.console);
-                    }
-                    let board = self.project.circuit.board_id.clone();
-                    self.project = Project::new("untitled", &board);
-                    self.project_path = None;
-                    self.selection = Selection::None;
-                    self.topo_rev += 1;
-                    self.flow_rev += 1;
-                    ui.close();
-                }
-                if ui.button("Open…").clicked() {
-                    self.open_project();
-                    ui.close();
-                }
-                if ui.button("Save").clicked() {
-                    self.save_project(false);
-                    ui.close();
-                }
-                if ui.button("Save as…").clicked() {
-                    self.save_project(true);
-                    ui.close();
-                }
+    /// Window top strip: menus and project name on the left, device controls on the right.
+    fn show_title_bar(&mut self, ui: &mut egui::Ui) {
+        let frameless = self.chrome.frameless;
+        let _ = TitleBar::new("wirelab.title_bar", if frameless { "WireLab" } else { "" })
+            .frameless(frameless)
+            .mark(Icon::glyph(egui_phosphor::regular::CIRCUITRY))
+            .show(ui, |ui, side| match side {
+                Side::Left => self.show_menus(ui),
+                Side::Right => self.show_device_bar(ui),
             });
-            ui.menu_button("Tools", |ui| {
-                if ui
-                    .button(if self.ide.open { "📜 Hide IDE" } else { "📜 Open IDE" })
-                    .on_hover_text("the script IDE window (editors, hardware tree, problems)")
-                    .clicked()
-                {
-                    self.ide.open = !self.ide.open;
-                    ui.close();
+    }
+
+    fn show_menus(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("File", |ui| {
+            if ui.button("New").clicked() {
+                self.live.disconnect(&mut self.console);
+                for (_, mut bb) in self.background.drain() {
+                    bb.live.disconnect(&mut self.console);
                 }
-                if !self.examples.is_empty() {
-                    ui.menu_button("Examples", |ui| {
-                        let examples = self.examples.clone();
-                        for (name, path) in &examples {
-                            if ui.button(name).clicked() {
-                                // Examples never save back over the shipped file.
-                                self.load_project_path(path, false);
-                                ui.close();
-                            }
-                        }
-                    });
-                }
-                if ui
-                    .button("✨ AI board import")
-                    .on_hover_text("turn a manufacturer pinout/spec into a board profile")
-                    .clicked()
-                {
-                    self.ai.open = true;
-                    ui.close();
-                }
-                ui.separator();
-                self.mcp_submenu(ui);
-            });
-            ui.separator();
-            ui.label("project");
-            ui.add(egui::TextEdit::singleline(&mut self.project.name).desired_width(140.0));
-            if let Selection::Comps(v) = &self.selection
-                && v.len() >= 2 {
-                    let n = v.len();
-                    if ui
-                        .button(RichText::new(format!("⚡ Auto wire ({n})")).strong())
-                        .on_hover_text("wire the selected components to free board pins")
-                        .clicked()
-                    {
-                        self.apply_auto_wire();
-                    }
-                }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.show_device_bar(ui);
-            });
+                let board = self.project.circuit.board_id.clone();
+                self.project = Project::new("untitled", &board);
+                self.project_path = None;
+                self.selection = Selection::None;
+                self.topo_rev += 1;
+                self.flow_rev += 1;
+                ui.close();
+            }
+            if ui.button("Open…").clicked() {
+                self.open_project();
+                ui.close();
+            }
+            if ui.button("Save").clicked() {
+                self.save_project(false);
+                ui.close();
+            }
+            if ui.button("Save as…").clicked() {
+                self.save_project(true);
+                ui.close();
+            }
         });
+        ui.menu_button("Tools", |ui| {
+            if ui
+                .button(if self.ide.open { "📜 Hide IDE" } else { "📜 Open IDE" })
+                .on_hover_text("the script IDE window (editors, hardware tree, problems)")
+                .clicked()
+            {
+                self.ide.open = !self.ide.open;
+                ui.close();
+            }
+            if !self.examples.is_empty() {
+                ui.menu_button("Examples", |ui| {
+                    let examples = self.examples.clone();
+                    for (name, path) in &examples {
+                        if ui.button(name).clicked() {
+                            // Examples never save back over the shipped file.
+                            self.load_project_path(path, false);
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            if ui
+                .button("✨ AI board import")
+                .on_hover_text("turn a manufacturer pinout/spec into a board profile")
+                .clicked()
+            {
+                self.ai.open = true;
+                ui.close();
+            }
+            ui.separator();
+            self.mcp_submenu(ui);
+        });
+        ui.menu_button("View", |ui| {
+            let _ = chrome::toggle_row(ui, &mut self.chrome, "Custom title bar");
+            ui.separator();
+            if ui.button("Theme settings…").clicked() {
+                self.theme.picker.open = true;
+                ui.close();
+            }
+        });
+        ui.separator();
+        ui.label("project");
+        ui.add(egui::TextEdit::singleline(&mut self.project.name).desired_width(140.0));
+        if let Selection::Comps(v) = &self.selection
+            && v.len() >= 2 {
+                let n = v.len();
+                if ui
+                    .button(RichText::new(format!("⚡ Auto wire ({n})")).strong())
+                    .on_hover_text("wire the selected components to free board pins")
+                    .clicked()
+                {
+                    self.apply_auto_wire();
+                }
+            }
     }
 
     /// The MCP-server submenu: status, connect string, and a start/stop toggle.
@@ -1152,11 +1133,7 @@ impl eframe::App for WireLabApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            ui.add_space(4.0);
-            self.show_toolbar(ui);
-            ui.add_space(4.0);
-        });
+        self.show_title_bar(ui);
         egui::Panel::top("board-tabs").show(ui, |ui| {
             self.show_board_tabs(ui);
         });
@@ -1194,6 +1171,18 @@ impl eframe::App for WireLabApp {
                 },
             );
         }
+
+        self.theme.show(&ctx);
+        if let Some(e) = chrome::take_save_error(&ctx) {
+            self.log(format!("couldn't save the title bar setting: {e}"));
+        }
+        if self.chrome.frameless {
+            window_edges(ui);
+        }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.theme.flush();
     }
 }
 
@@ -1242,8 +1231,8 @@ mod tests {
     #[test]
     fn shipped_theme_deserializes() {
         let path = super::find_assets_dir().join("theme.json");
-        let style = super::load_theme(&path).expect("theme.json parses as egui::Style");
-        assert!(style.visuals.dark_mode);
-        assert_eq!(style.visuals.panel_fill, egui::Color32::from_rgb(0, 0, 0));
+        let theme = egui_theme_kit::persist::load_file(&path).expect("theme.json loads as a kit theme");
+        assert!(theme.style.visuals.dark_mode);
+        assert_eq!(theme.style.visuals.panel_fill, egui::Color32::from_rgb(0, 0, 0));
     }
 }

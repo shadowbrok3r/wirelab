@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
-use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService,
@@ -187,7 +187,7 @@ impl McpServer {
                 };
                 rt.block_on(async move {
                     let mut config = StreamableHttpServerConfig::default();
-                    config.stateful_mode = false;
+                    config.legacy_session_mode = false;
                     config.json_response = true;
                     let (view_tx, view_ctx) = (tx.clone(), ctx.clone());
                     let service = StreamableHttpService::new(
@@ -625,8 +625,8 @@ impl WirelabTools {
 
 #[tool_handler]
 impl ServerHandler for WirelabTools {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "WireLab: a live ESP32 circuit builder. Inspect with get_circuit / \
              validate_circuit, build with add_component / add_wire / auto_wire / \
              fix_lints, program with set_script (see get_scripting_reference) or \

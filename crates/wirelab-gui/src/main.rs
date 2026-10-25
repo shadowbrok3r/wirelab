@@ -15,20 +15,34 @@ mod panels;
 mod panels_info;
 mod rhai_docs;
 mod rhai_lint;
+mod theme;
 mod wiring_guide;
+
+use egui_theme_kit::chrome;
+use egui_theme_kit::title_bar::windows::client_area;
 
 fn main() -> eframe::Result {
     env_logger::init();
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+    let chrome = chrome::resolve_from_process(theme::APP_ID);
+    let viewport = chrome::viewport(
+        egui::ViewportBuilder::default()
             .with_inner_size([1480.0, 940.0])
             .with_min_inner_size([900.0, 600.0])
             .with_title("WireLab — live ESP32 circuit builder"),
+        &chrome,
+    );
+    let options = eframe::NativeOptions {
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
         "WireLab",
         options,
-        Box::new(|cc| Ok(Box::new(app::WireLabApp::new(cc)))),
+        Box::new(move |cc| {
+            if !client_area::install(cc) {
+                log::warn!("title bar client-area fix not installed");
+            }
+            Ok(Box::new(app::WireLabApp::new(cc, chrome)))
+        }),
     )
 }

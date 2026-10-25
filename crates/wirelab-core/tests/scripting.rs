@@ -271,6 +271,21 @@ fn script_beep_continuation_survives_program_stop() {
 }
 
 #[test]
+fn script_actions_after_a_beep_are_not_deferred() {
+    let lib = mini_lib();
+    let (mut circuit, _led, btn) = btn_led_circuit(&lib);
+    let (mut host, mut engine) =
+        host_for(&mut circuit, &lib, btn, "fn on_press() { led.beep(100); pin(4).high(); }");
+    let msgs = engine.run_script_actions(host.on_press(btn), 0);
+    assert_eq!(
+        msgs,
+        vec![HostMsg::WriteDigital { pin: 2, high: true }, HostMsg::WriteDigital { pin: 4, high: true }]
+    );
+    assert_eq!(engine.tick(50), vec![]);
+    assert_eq!(engine.tick(120), vec![HostMsg::WriteDigital { pin: 2, high: false }]);
+}
+
+#[test]
 fn on_reading_gates_small_changes() {
     let lib = mini_lib();
     let (mut circuit, _led, btn) = btn_led_circuit(&lib);

@@ -98,7 +98,7 @@ fn examples_load_and_run() {
             );
         }
     }
-    assert_eq!(n, 19, "expected the nineteen shipped examples");
+    assert_eq!(n, 20, "expected the twenty shipped examples");
 }
 
 /// The LCD messenger: a press on the C5 desk board sends a message to the
@@ -545,4 +545,105 @@ fn lcd_clock_example_paints() {
     assert!(
         msgs.iter().any(|m| matches!(m, wirelab_proto::HostMsg::LcdClear { rgb565 } if *rgb565 == wirelab_core::program::rgb565([0, 0, 40])))
     );
+}
+
+/// The pulse-arc welder: the key charges the bank, the pedal pre-flows then
+/// arms, touch-and-lift counts one weld per press, over-voltage faults.
+#[test]
+fn pulse_arc_welder_example_sequences() {
+    use std::collections::HashMap;
+    use wirelab_core::program::Action;
+
+    let assets = assets_dir();
+    let lib = Library::load(&assets.join("boards"), &assets.join("components"))
+        .expect("assets parse");
+    let project = wirelab_core::project::Project::load(
+        &assets.join("examples/20-pulse-arc-welder.wirelab.json"),
+    )
+    .expect("example parses");
+    let board = lib.board(&project.circuit.board_id).expect("board");
+
+    // Relays, ARM LED and beeper out; key, pedal and tip in; knob and bank analog.
+    let nl = wirelab_core::netlist::Netlist::build(&project.circuit, board, &lib);
+    let (_msgs, bindings) =
+        wirelab_core::engine::plan_setup(&project.circuit, board, &lib, &nl);
+    assert_eq!(bindings.outputs.len(), 4, "{:?}", bindings.warnings);
+    assert_eq!(bindings.inputs.len(), 3);
+    assert_eq!(bindings.analog.len(), 2);
+
+    let id = |label: &str| {
+        project
+            .circuit
+            .components
+            .values()
+            .find(|c| c.label == label)
+            .map(|c| c.id)
+            .unwrap_or_else(|| panic!("no component {label}"))
+    };
+    let (panel, key, pedal, tip) = (id("panel"), id("arm_key"), id("pedal"), id("tip_contact"));
+    let (energy, bank) = (id("energy"), id("bank_sense"));
+    let (charger, argon, armed, beeper) = (id("charger"), id("argon"), id("armed"), id("beeper"));
+
+    let mut host = wirelab_core::script::ScriptHost::new();
+    host.set_board(board.chip.name(), &board.specs, board.features.rgb_led_gpio);
+    host.sync(&project.circuit, &lib);
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+
+    // Mid knob is 5.0 J, a 28.5 V target; the bank divider is 21:1.
+    let world = |now: u64, key_on: bool, pedal_on: bool, tip_on: bool, bank_v: f64| {
+        wirelab_core::script::World {
+            now_ms: now,
+            inputs_on: HashMap::from([(key, key_on), (pedal, pedal_on), (tip, tip_on)]),
+            analog_mv: HashMap::from([(energy, 1650), (bank, (bank_v / 21.0 * 1000.0) as u16)]),
+            ..Default::default()
+        }
+    };
+    let did = |actions: &[Action], comp: wirelab_core::circuit::CompId, verb: &str| {
+        actions.iter().any(
+            |a| matches!(a, Action::CompAction { comp: c, action, .. } if *c == comp && action == verb),
+        )
+    };
+
+    host.set_world(world(1000, false, false, false, 0.0));
+    host.on_start(panel);
+    host.tick(1010);
+
+    host.set_world(world(1050, true, false, false, 0.0));
+    let a = host.tick(1050);
+    assert!(did(&a, charger, "on"), "key on charges: {a:?}");
+
+    host.set_world(world(1100, true, false, false, 28.6));
+    let a = host.tick(1100);
+    assert!(did(&a, charger, "off"), "bank at target stops charging: {a:?}");
+
+    host.set_world(world(1150, true, true, false, 28.6));
+    let a = host.tick(1150);
+    assert!(did(&a, argon, "on") && !did(&a, armed, "on"), "pedal starts pre-flow only: {a:?}");
+
+    host.set_world(world(1600, true, true, false, 28.6));
+    let a = host.tick(1600);
+    assert!(did(&a, armed, "on"), "pre-flow done arms: {a:?}");
+
+    host.set_world(world(1650, true, true, true, 28.6));
+    host.tick(1650);
+    host.set_world(world(1700, true, true, false, 28.6));
+    let a = host.tick(1700);
+    assert!(did(&a, armed, "off") && did(&a, beeper, "beep"), "lift fires and disarms: {a:?}");
+    assert!(host.take_logs().iter().any(|l| l.contains("weld #1")));
+
+    host.set_world(world(2950, true, true, false, 28.6));
+    let a = host.tick(2950);
+    assert!(did(&a, argon, "off") && did(&a, charger, "on"), "post-flow ends, recharge: {a:?}");
+
+    host.set_world(world(3000, true, true, false, 28.6));
+    let a = host.tick(3000);
+    assert!(!did(&a, argon, "on"), "held pedal does not re-arm: {a:?}");
+
+    host.set_world(world(3050, true, false, false, 69.0));
+    host.tick(3050);
+    assert!(host.take_logs().iter().any(|l| l.contains("FAULT: OVERVOLTAGE")));
+
+    host.set_world(world(3100, false, false, false, 0.0));
+    host.tick(3100);
+    assert!(host.take_logs().iter().any(|l| l.contains("FAULT -> SAFE")));
 }

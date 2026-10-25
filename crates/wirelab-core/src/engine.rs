@@ -416,9 +416,13 @@ impl Engine {
     }
 
     /// Run actions produced by a component script, outside any rule.
+    ///
+    /// Each action gets its own queue, so a `beep`/`tone` continuation delays only its own off step.
     pub fn run_script_actions(&mut self, actions: Vec<Action>, now_ms: u64) -> Vec<HostMsg> {
         let mut out = Vec::new();
-        self.run_actions(SCRIPT_RULE_IDX, actions.into(), now_ms, &mut out);
+        for action in actions {
+            self.run_actions(SCRIPT_RULE_IDX, VecDeque::from([action]), now_ms, &mut out);
+        }
         out
     }
 

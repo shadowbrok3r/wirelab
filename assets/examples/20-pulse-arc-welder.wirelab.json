@@ -1,0 +1,731 @@
+{
+ "name": "Pulse-arc welder controller (key, pedal, argon, lift-arc)",
+ "active": 0,
+ "boards": [
+  {
+   "circuit": {
+    "board_id": "esp32-c5-devkitc-1",
+    "board_pos": [
+     0.0,
+     0.0
+    ],
+    "components": {
+     "1": {
+      "def_id": "led-red",
+      "id": 1,
+      "label": "armed",
+      "pos": [
+       -18.0,
+       10.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "none"
+      }
+     },
+     "10": {
+      "def_id": "push-button",
+      "id": 10,
+      "label": "tip_contact",
+      "pos": [
+       50.0,
+       62.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "button",
+       "pressed": false
+      }
+     },
+     "11": {
+      "def_id": "resistor-220",
+      "id": 11,
+      "label": "",
+      "pos": [
+       -10.0,
+       24.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "none"
+      }
+     },
+     "2": {
+      "def_id": "buzzer-active",
+      "id": 2,
+      "label": "beeper",
+      "pos": [
+       -13.0,
+       83.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "none"
+      }
+     },
+     "3": {
+      "def_id": "potentiometer-10k",
+      "id": 3,
+      "label": "energy",
+      "pos": [
+       -22.0,
+       -28.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "fraction",
+       "value": 0.5
+      }
+     },
+     "4": {
+      "def_id": "push-button",
+      "id": 4,
+      "label": "pedal",
+      "pos": [
+       -18.0,
+       56.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "button",
+       "pressed": false
+      }
+     },
+     "5": {
+      "def_id": "relay-module-1ch",
+      "id": 5,
+      "label": "argon",
+      "pos": [
+       -35.0,
+       109.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "none"
+      }
+     },
+     "6": {
+      "def_id": "relay-module-1ch",
+      "id": 6,
+      "label": "charger",
+      "pos": [
+       -101.0,
+       87.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "none"
+      }
+     },
+     "7": {
+      "def_id": "st7735-tft-128",
+      "id": 7,
+      "label": "panel",
+      "pos": [
+       -103.0,
+       -16.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "script": "// Pulse-arc welder controller: key, charge, pre-flow, arm, fire on lift, post-flow.\n\nfn fmt1(x) {\n    let t = (x * 10.0).round().to_int();\n    `${t / 10}.${t % 10}`\n}\n\nfn volts_for(e, c_f, v_arc) {\n    (2.0 * e / c_f + v_arc * v_arc).sqrt()\n}\n\n// Log-taper knob: 0..3300 mV -> e_min..e_max joules in 0.1 J steps.\nfn knob_joules(mv, e_min, e_max) {\n    let x = mv.to_float() / 3300.0;\n    if x < 0.0 { x = 0.0; }\n    if x > 1.0 { x = 1.0; }\n    let e = e_min * ((e_max / e_min).ln() * x).exp();\n    (e * 10.0).round() / 10.0\n}\n\nfn set_outputs(st) {\n    if st == \"CHARGE\" { charger.on(); } else { charger.off(); }\n    if st == \"PREFLOW\" || st == \"ARMED\" || st == \"POST\" { argon.on(); } else { argon.off(); }\n    if st == \"ARMED\" { armed.on(); } else { armed.off(); }\n}\n\nfn state_color(st) {\n    switch st {\n        \"SAFE\" => [40, 60, 140],\n        \"CHARGE\" => [200, 140, 0],\n        \"READY\" => [0, 170, 70],\n        \"HIGH\" => [130, 60, 170],\n        \"PREFLOW\" | \"POST\" => [0, 130, 170],\n        \"ARMED\" => [220, 30, 30],\n        \"STUCK\" => [220, 100, 0],\n        _ => [220, 0, 0]\n    }\n}\n\nfn hint(st, fault) {\n    switch st {\n        \"SAFE\" => \"turn arm key on\",\n        \"CHARGE\" => \"charging bank...\",\n        \"READY\" => \"hold pedal to arm\",\n        \"HIGH\" => \"bleeding down...\",\n        \"PREFLOW\" => \"argon pre-flow\",\n        \"ARMED\" => \"touch, then lift\",\n        \"POST\" => \"argon post-flow\",\n        \"STUCK\" => \"lift tip, resharpen\",\n        \"FAULT\" => fault,\n        _ => \"\"\n    }\n}\n\nfn paint_line(y, text, r, g, b) {\n    lcd_rect(0, y - 2, 128, 13, 6, 8, 16);\n    lcd_text(4, y, text, r, g, b);\n}\n\nfn paint_state(st, fault) {\n    let c = state_color(st);\n    lcd_rect(0, 0, 128, 16, c[0], c[1], c[2]);\n    lcd_text(4, 4, \"PULSE ARC\", 255, 255, 255);\n    lcd_text(124 - st.len * 6, 4, st, 255, 255, 255);\n    lcd_rect(0, 108, 128, 20, 16, 18, 30);\n    lcd_text(4, 113, hint(st, fault), 225, 225, 235);\n}\n\nfn on_start() {\n    this.k = #{\n        c_f: 0.015,              // bank capacitance, farads\n        v_arc: 12.0,             // bank volts where the arc goes out\n        v_trip: 64.0,            // over-voltage fault, volts\n        div: 21.0,               // bank divider ratio, 200k over 10k\n        e_min: 1.0,\n        e_max: 25.0,\n        tol: 0.8,                // ready window around the target, volts\n        preflow_ms: 400,\n        postflow_ms: 1200,\n        arm_timeout_ms: 8000,\n        stuck_ms: 3000,\n        charge_timeout_ms: 30000\n    };\n    this.st = \"BOOT\";\n    this.t_state = millis();\n    this.fault = \"\";\n    this.welds = 0;\n    this.e_set = -1.0;\n    this.v_tgt = 0.0;\n    this.knob_mv = -1000;\n    this.v_shown = -100.0;\n    this.t_paint = 0;\n    this.ped_prev = false;\n    this.tip_prev = false;\n    this.touched = false;\n    this.t_touch = 0;\n    this.blink = false;\n    this.t_blink = 0;\n    set_outputs(\"SAFE\");\n    lcd_init(7, 2, 25, 26, 3);\n    lcd_clear(6, 8, 16);\n    paint_line(74, \"WELDS 0\", 200, 200, 210);\n    paint_line(90, `C ${fmt1(this.k.c_f * 1000.0)} mF  trip ${fmt1(this.k.v_trip)} V`, 110, 120, 150);\n    log(\"arm_key on, set energy, drag bank_sense to TGT, hold pedal, press then release tip_contact\");\n}\n\nfn on_tick(dt_ms) {\n    // Skip ticks until on_start has run.\n    if this.st == () { return; }\n    let k = this.k;\n    let now = millis();\n\n    let key = arm_key.is_on();\n    let ped = pedal.is_pressed();\n    let ped_edge = ped && !this.ped_prev;\n    this.ped_prev = ped;\n    let tip = tip_contact.is_pressed();\n    let tip_down = tip && !this.tip_prev;\n    let tip_up = !tip && this.tip_prev;\n    this.tip_prev = tip;\n\n    let mv = energy.millivolts();\n    if (mv - this.knob_mv).abs() > 12 {\n        this.knob_mv = mv;\n        let e = knob_joules(mv, k.e_min, k.e_max);\n        if e != this.e_set {\n            this.e_set = e;\n            this.v_tgt = volts_for(e, k.c_f, k.v_arc);\n            this.v_shown = -100.0;\n            paint_line(26, `SET   ${fmt1(e)} J`, 255, 220, 90);\n            paint_line(42, `TGT   ${fmt1(this.v_tgt)} V`, 170, 190, 255);\n        }\n    }\n    let v_tgt = this.v_tgt;\n    let v_bank = bank_sense.millivolts().to_float() / 1000.0 * k.div;\n\n    let st = this.st;\n    let next = st;\n    let fired = false;\n    let beep_ms = 0;\n    let age = now - this.t_state;\n    if !key {\n        next = \"SAFE\";\n    } else if v_bank > k.v_trip {\n        next = \"FAULT\";\n        this.fault = \"OVERVOLTAGE\";\n    } else {\n        switch st {\n            \"BOOT\" | \"SAFE\" => { next = \"CHARGE\"; },\n            \"CHARGE\" => {\n                if v_bank >= v_tgt {\n                    next = \"READY\";\n                } else if age > k.charge_timeout_ms {\n                    next = \"FAULT\";\n                    this.fault = \"CHARGE TIMEOUT\";\n                }\n            },\n            \"READY\" => {\n                if v_bank < v_tgt - k.tol {\n                    next = \"CHARGE\";\n                } else if v_bank > v_tgt + k.tol {\n                    next = \"HIGH\";\n                } else if ped_edge {\n                    next = \"PREFLOW\";\n                }\n            },\n            \"HIGH\" => {\n                if v_bank <= v_tgt + k.tol / 2.0 { next = \"READY\"; }\n            },\n            \"PREFLOW\" => {\n                if !ped {\n                    next = \"POST\";\n                } else if age >= k.preflow_ms {\n                    next = \"ARMED\";\n                }\n            },\n            \"ARMED\" => {\n                if !ped {\n                    next = \"POST\";\n                } else if tip_down {\n                    this.touched = true;\n                    this.t_touch = now;\n                } else if tip_up && this.touched {\n                    next = \"POST\";\n                    fired = true;\n                } else if tip && this.touched && now - this.t_touch > k.stuck_ms {\n                    next = \"STUCK\";\n                } else if !tip && age > k.arm_timeout_ms {\n                    next = \"POST\";\n                }\n            },\n            \"POST\" => {\n                if age >= k.postflow_ms { next = \"CHARGE\"; }\n            },\n            \"STUCK\" => {\n                if !tip { next = \"CHARGE\"; }\n            },\n            _ => {}\n        }\n    }\n\n    if next != st {\n        this.st = next;\n        this.t_state = now;\n        if next == \"ARMED\" {\n            this.touched = tip;\n            this.t_touch = now;\n        }\n        if next == \"SAFE\" { this.fault = \"\"; }\n        set_outputs(next);\n        let c = state_color(next);\n        rgb(c[0] / 4, c[1] / 4, c[2] / 4);\n        paint_state(next, this.fault);\n        if fired {\n            this.welds += 1;\n            beep_ms = 60;\n            paint_line(74, `WELDS ${this.welds}`, 200, 200, 210);\n            log(`weld #${this.welds}: ${fmt1(this.e_set)} J at ${fmt1(v_bank)} V`);\n        }\n        if next == \"STUCK\" {\n            beep_ms = 400;\n            log(\"tip held on the work while armed: disarmed\");\n        }\n        if next == \"FAULT\" {\n            beep_ms = 800;\n            log(`FAULT: ${this.fault}`);\n        }\n        log(`${st} -> ${next}`);\n    }\n\n    if (v_bank - this.v_shown).abs() >= 0.3 && now - this.t_paint >= 200 {\n        this.v_shown = v_bank;\n        this.t_paint = now;\n        let c = if v_bank < v_tgt - k.tol {\n            [255, 170, 40]\n        } else if v_bank > v_tgt + k.tol {\n            [200, 120, 255]\n        } else {\n            [90, 230, 120]\n        };\n        paint_line(58, `BANK  ${fmt1(v_bank)} V`, c[0], c[1], c[2]);\n    }\n\n    if this.st == \"FAULT\" && now - this.t_blink >= 300 {\n        this.t_blink = now;\n        this.blink = !this.blink;\n        if this.blink { rgb(55, 0, 0); } else { rgb(0, 0, 0); }\n    }\n\n    // Beep after every other action this tick.\n    if beep_ms > 0 { beeper.beep(beep_ms); }\n}\n",
+      "state": {
+       "kind": "none"
+      }
+     },
+     "8": {
+      "def_id": "generic-analog-sensor",
+      "id": 8,
+      "label": "bank_sense",
+      "pos": [
+       81.0,
+       -19.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "fraction",
+       "value": 0.0
+      }
+     },
+     "9": {
+      "def_id": "toggle-switch",
+      "id": 9,
+      "label": "arm_key",
+      "pos": [
+       89.0,
+       88.0
+      ],
+      "props": {},
+      "rotation": 0,
+      "state": {
+       "kind": "toggle",
+       "on": false
+      }
+     }
+    },
+    "next_comp": 12,
+    "next_wire": 34,
+    "wires": {
+     "10": {
+      "a": {
+       "at": "terminal",
+       "comp": 5,
+       "terminal": "vcc"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "5V"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 10,
+      "waypoints": []
+     },
+     "11": {
+      "a": {
+       "at": "terminal",
+       "comp": 5,
+       "terminal": "gnd"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 11,
+      "waypoints": []
+     },
+     "12": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO8"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 5,
+       "terminal": "signal"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 12,
+      "waypoints": []
+     },
+     "13": {
+      "a": {
+       "at": "terminal",
+       "comp": 6,
+       "terminal": "vcc"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "5V"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 13,
+      "waypoints": []
+     },
+     "14": {
+      "a": {
+       "at": "terminal",
+       "comp": 6,
+       "terminal": "gnd"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 14,
+      "waypoints": []
+     },
+     "15": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO9"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 6,
+       "terminal": "signal"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 15,
+      "waypoints": []
+     },
+     "16": {
+      "a": {
+       "at": "terminal",
+       "comp": 7,
+       "terminal": "vin"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "5V"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 16,
+      "waypoints": []
+     },
+     "17": {
+      "a": {
+       "at": "terminal",
+       "comp": 7,
+       "terminal": "gnd"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 17,
+      "waypoints": []
+     },
+     "18": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO7"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 7,
+       "terminal": "sck"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 18,
+      "waypoints": []
+     },
+     "19": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO2"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 7,
+       "terminal": "mosi"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 19,
+      "waypoints": []
+     },
+     "2": {
+      "a": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "cathode"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 2,
+      "waypoints": []
+     },
+     "20": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO25"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 7,
+       "terminal": "tft_cs"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 20,
+      "waypoints": []
+     },
+     "21": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO26"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 7,
+       "terminal": "dc"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 21,
+      "waypoints": []
+     },
+     "22": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO3"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 7,
+       "terminal": "reset"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 22,
+      "waypoints": []
+     },
+     "23": {
+      "a": {
+       "at": "terminal",
+       "comp": 8,
+       "terminal": "vcc"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "3V3"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 23,
+      "waypoints": []
+     },
+     "24": {
+      "a": {
+       "at": "terminal",
+       "comp": 8,
+       "terminal": "gnd"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND4"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 24,
+      "waypoints": []
+     },
+     "25": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO4"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 8,
+       "terminal": "signal"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 25,
+      "waypoints": []
+     },
+     "26": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO23"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 9,
+       "terminal": "a"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 26,
+      "waypoints": []
+     },
+     "27": {
+      "a": {
+       "at": "terminal",
+       "comp": 9,
+       "terminal": "b"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND2"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 27,
+      "waypoints": []
+     },
+     "28": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO24"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 10,
+       "terminal": "a"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 28,
+      "waypoints": []
+     },
+     "29": {
+      "a": {
+       "at": "terminal",
+       "comp": 10,
+       "terminal": "b"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND2"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 29,
+      "waypoints": []
+     },
+     "3": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO6"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 2,
+       "terminal": "signal"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 3,
+      "waypoints": []
+     },
+     "30": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO10"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 11,
+       "terminal": "a"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 30,
+      "waypoints": []
+     },
+     "31": {
+      "a": {
+       "at": "terminal",
+       "comp": 11,
+       "terminal": "b"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 1,
+       "terminal": "anode"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 31,
+      "waypoints": []
+     },
+     "32": {
+      "a": {
+       "at": "terminal",
+       "comp": 3,
+       "terminal": "end_a"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 32,
+      "waypoints": []
+     },
+     "33": {
+      "a": {
+       "at": "terminal",
+       "comp": 3,
+       "terminal": "end_b"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "3V3"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 33,
+      "waypoints": []
+     },
+     "4": {
+      "a": {
+       "at": "terminal",
+       "comp": 2,
+       "terminal": "gnd"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 4,
+      "waypoints": []
+     },
+     "7": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO1"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 3,
+       "terminal": "wiper"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 7,
+      "waypoints": []
+     },
+     "8": {
+      "a": {
+       "at": "board_pin",
+       "key": "GPIO0"
+      },
+      "b": {
+       "at": "terminal",
+       "comp": 4,
+       "terminal": "a"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 8,
+      "waypoints": []
+     },
+     "9": {
+      "a": {
+       "at": "terminal",
+       "comp": 4,
+       "terminal": "b"
+      },
+      "b": {
+       "at": "board_pin",
+       "key": "GND1"
+      },
+      "color": [
+       190,
+       120,
+       255
+      ],
+      "id": 9,
+      "waypoints": []
+     }
+    }
+   },
+   "flow": {
+    "nodes": [],
+    "wires": []
+   },
+   "id": 1,
+   "name": "welder",
+   "program": {
+    "rules": []
+   }
+  }
+ ]
+}

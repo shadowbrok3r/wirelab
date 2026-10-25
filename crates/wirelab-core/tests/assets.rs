@@ -589,7 +589,7 @@ fn pulse_arc_welder_example_sequences() {
     host.sync(&project.circuit, &lib);
     assert!(host.errors.is_empty(), "{:?}", host.errors);
 
-    // Mid knob is 5.0 J, a 28.5 V target; the bank divider is 21:1.
+    // Mid knob is 4.8 J, a 28.7 V target on 14.1 mF; the bank divider is 21:1.
     let world = |now: u64, key_on: bool, pedal_on: bool, tip_on: bool, bank_v: f64| {
         wirelab_core::script::World {
             now_ms: now,
@@ -612,30 +612,30 @@ fn pulse_arc_welder_example_sequences() {
     let a = host.tick(1050);
     assert!(did(&a, charger, "on"), "key on charges: {a:?}");
 
-    host.set_world(world(1100, true, false, false, 28.6));
+    host.set_world(world(1100, true, false, false, 29.0));
     let a = host.tick(1100);
     assert!(did(&a, charger, "off"), "bank at target stops charging: {a:?}");
 
-    host.set_world(world(1150, true, true, false, 28.6));
+    host.set_world(world(1150, true, true, false, 29.0));
     let a = host.tick(1150);
     assert!(did(&a, argon, "on") && !did(&a, armed, "on"), "pedal starts pre-flow only: {a:?}");
 
-    host.set_world(world(1600, true, true, false, 28.6));
+    host.set_world(world(1600, true, true, false, 29.0));
     let a = host.tick(1600);
     assert!(did(&a, armed, "on"), "pre-flow done arms: {a:?}");
 
-    host.set_world(world(1650, true, true, true, 28.6));
+    host.set_world(world(1650, true, true, true, 29.0));
     host.tick(1650);
-    host.set_world(world(1700, true, true, false, 28.6));
+    host.set_world(world(1700, true, true, false, 29.0));
     let a = host.tick(1700);
     assert!(did(&a, armed, "off") && did(&a, beeper, "beep"), "lift fires and disarms: {a:?}");
     assert!(host.take_logs().iter().any(|l| l.contains("weld #1")));
 
-    host.set_world(world(2950, true, true, false, 28.6));
+    host.set_world(world(2950, true, true, false, 29.0));
     let a = host.tick(2950);
     assert!(did(&a, argon, "off") && did(&a, charger, "on"), "post-flow ends, recharge: {a:?}");
 
-    host.set_world(world(3000, true, true, false, 28.6));
+    host.set_world(world(3000, true, true, false, 29.0));
     let a = host.tick(3000);
     assert!(!did(&a, argon, "on"), "held pedal does not re-arm: {a:?}");
 

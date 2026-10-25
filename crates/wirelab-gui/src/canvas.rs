@@ -6,7 +6,11 @@ use wirelab_core::component::{CompState, SimModel};
 use wirelab_core::netlist::{WireVerdict, wire_verdict};
 use wirelab_proto::PinMode;
 
+use egui_theme_kit::controls::{self, BarKind};
+
 use crate::app::{Selection, WireLabApp};
+use crate::dock::Tab;
+use crate::ui_kit::{self, ph};
 use crate::draw::{
     self, BoardControl, PIN_HIT_RADIUS_PX, PinLive, View, board_feature_rects,
     board_pin_world_pos, terminal_world_pos,
@@ -24,6 +28,10 @@ pub struct CanvasState {
     /// Hit and world position captured when the context menu opened.
     ctx_hit: Option<Hit>,
     ctx_world: [f32; 2],
+    /// Screen rect the canvas filled last frame, for toolbar zoom and fit.
+    pub view_rect: Rect,
+    /// Fit the circuit into view on the next frame.
+    pub fit_pending: bool,
 }
 
 impl Default for CanvasState {
@@ -38,6 +46,8 @@ impl Default for CanvasState {
             select_start: None,
             ctx_hit: None,
             ctx_world: [0.0, 0.0],
+            view_rect: Rect::NOTHING,
+            fit_pending: true,
         }
     }
 }
@@ -322,6 +332,11 @@ impl WireLabApp {
         let hint_color = ui.visuals().weak_text_color();
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let rect = response.rect;
+        self.canvas.view_rect = rect;
+        if self.canvas.fit_pending && rect.is_positive() {
+            self.canvas.fit_pending = false;
+            self.fit_view();
+        }
         let view = View {
             origin: rect.min + self.canvas.offset,
             scale: self.canvas.zoom * 4.0,
@@ -474,9 +489,12 @@ impl WireLabApp {
             draw::draw_component(&painter, &view, &comp, &def, vis, selected, accent, active, time);
             // The simulated / mirrored screen contents of SPI displays.
             if def.id.starts_with("st7735")
-                && let Some(ops) = live_out.as_ref().and_then(|o| o.lcd.as_ref()) {
-                    draw::draw_lcd(&painter, &view, &comp, &def, ops);
-                }
+                && let Some(ops) = live_out.as_ref().and_then(|o| o.lcd.as_ref())
+            {
+                let texture = self.lcd_texture.texture(ui.ctx(), ops);
+                crate::lcd::paint(&painter, crate::lcd::screen_rect(&view, &comp, &def), comp.rotation, texture);
+            }
+            self.paint_script_badge(ui, &view, &comp, &def, time);
         }
 
         // Spotlight the components a hovered warning refers to.
@@ -486,10 +504,7 @@ impl WireLabApp {
             for id in &self.hover_highlight {
                 let Some(comp) = self.project.circuit.components.get(id) else { continue };
                 let Some(def) = self.lib.component(&comp.def_id) else { continue };
-                let body = Rect::from_center_size(
-                    view.to_screen(comp.pos),
-                    Vec2::new(view.px(def.visual.width_mm), view.px(def.visual.height_mm)),
-                );
+                let body = Self::body_rect(&view, comp, def);
                 painter.rect_stroke(
                     body.expand(pulse + 4.0),
                     CornerRadius::same(5),
@@ -657,6 +672,19 @@ impl WireLabApp {
                 };
                 response.clone().on_hover_text(text);
             }
+
+        if let Some(Hit::Comp(id)) = &hover
+            && self.canvas.dragging.is_none()
+        {
+            let id = *id;
+            response.clone().on_hover_ui_at_pointer(|ui| self.comp_hover_card(ui, id));
+        }
+        if response.double_clicked()
+            && let Some(Hit::Comp(id)) = &hover
+        {
+            self.selection = Selection::Comp(*id);
+            self.open_tab(Tab::Script(*id));
+        }
 
         // Button press-and-hold in live mode.
         let primary_down = ui.input(|i| i.pointer.primary_down());
@@ -962,88 +990,76 @@ impl WireLabApp {
     }
 
     fn canvas_context_menu(&mut self, ui: &mut egui::Ui) {
-        ui.set_min_width(190.0);
         let world = self.canvas.ctx_world;
-
-        if let Some(Hit::Comp(id)) = self.canvas.ctx_hit.clone() {
-            let has_script = self
-                .project
-                .circuit
-                .components
-                .get(&id)
-                .is_some_and(|c| c.script.is_some());
-            if ui
-                .button(if has_script { "📜 Edit script" } else { "📜 Attach script" })
-                .clicked()
-            {
-                self.selection = Selection::Comp(id);
-                if !has_script {
-                    self.attach_template_script(id);
-                }
-                self.open_script_tab(id);
-                ui.close();
-            }
-            if ui.button("⟳ Rotate").clicked() {
-                if let Some(c) = self.project.circuit.components.get_mut(&id) {
-                    c.rotation = (c.rotation + 90) % 360;
-                    self.topo_rev += 1;
-                }
-                ui.close();
-            }
-            if ui.button("🗑 Delete").clicked() {
-                self.project.circuit.remove_component(id);
-                self.selection = Selection::None;
-                self.topo_rev += 1;
-                ui.close();
-            }
-            ui.separator();
-        }
-
-        let ids = self.selection.comp_ids();
-        let autowire_label = match ids.len() {
-            0 | 1 => match &self.canvas.ctx_hit {
-                Some(Hit::Comp(_)) => Some("⚡ Auto wire to board".to_string()),
-                _ => None,
-            },
-            n => Some(format!("⚡ Auto wire {n} selected")),
-        };
-        if let Some(label) = autowire_label
-            && ui.button(label).clicked() {
-                if ids.is_empty()
-                    && let Some(Hit::Comp(id)) = self.canvas.ctx_hit {
-                        self.selection = Selection::Comp(id);
+        controls::menu_body(ui, |ui| {
+            if let Some(Hit::Comp(id)) = self.canvas.ctx_hit.clone() {
+                let has_script = self.project.circuit.components.get(&id).is_some_and(|c| c.script.is_some());
+                let (icon, label) = if has_script { (ph::FILE_CODE, "Edit script") } else { (ph::FILE_PLUS, "Attach script") };
+                if ui_kit::menu_item(ui, icon, label).clicked() {
+                    self.selection = Selection::Comp(id);
+                    if !has_script {
+                        self.attach_template_script(id);
                     }
+                    self.open_script_tab(id);
+                    ui.close();
+                }
+                if ui_kit::menu_item(ui, ph::ARROW_CLOCKWISE, "Rotate").clicked() {
+                    if let Some(c) = self.project.circuit.components.get_mut(&id) {
+                        c.rotation = (c.rotation + 90) % 360;
+                        self.topo_rev += 1;
+                    }
+                    ui.close();
+                }
+                if controls::menu_danger_item(ui, ui_kit::kit(ph::TRASH), "Delete").clicked() {
+                    self.project.circuit.remove_component(id);
+                    self.selection = Selection::None;
+                    self.topo_rev += 1;
+                    ui.close();
+                }
+                controls::menu_separator(ui);
+            }
+
+            let ids = self.selection.comp_ids();
+            let autowire_label = match ids.len() {
+                0 | 1 => matches!(self.canvas.ctx_hit, Some(Hit::Comp(_))).then(|| "Auto wire to board".to_string()),
+                n => Some(format!("Auto wire {n} selected")),
+            };
+            if let Some(label) = autowire_label
+                && ui_kit::menu_item(ui, ph::MAGIC_WAND, &label).clicked()
+            {
+                if ids.is_empty()
+                    && let Some(Hit::Comp(id)) = self.canvas.ctx_hit
+                {
+                    self.selection = Selection::Comp(id);
+                }
                 self.apply_auto_wire();
                 ui.close();
             }
 
-        ui.menu_button("➕ Add component", |ui| {
-            let mut categories: Vec<String> =
-                self.lib.components.values().map(|c| c.category.clone()).collect();
+            let mut categories: Vec<String> = self.lib.components.values().map(|c| c.category.clone()).collect();
             categories.sort();
             categories.dedup();
             let mut place: Option<String> = None;
-            for cat in categories {
-                ui.menu_button(&cat, |ui| {
-                    for def in self.lib.components.values().filter(|c| c.category == cat) {
-                        if ui.button(&def.name).clicked() {
-                            place = Some(def.id.clone());
-                            ui.close();
+            let _ = controls::submenu(ui, ui_kit::kit(ph::PLUS), "Add part", |ui| {
+                for cat in &categories {
+                    let _ = controls::submenu(ui, ui_kit::kit(crate::icons::category(cat)), cat, |ui| {
+                        for def in self.lib.components.values().filter(|c| &c.category == cat) {
+                            if controls::menu_item(ui, ui_kit::kit(crate::icons::part(def)), &def.name).clicked() {
+                                place = Some(def.id.clone());
+                                ui.close();
+                            }
                         }
-                    }
-                });
-            }
+                    });
+                }
+            });
             if let Some(def_id) = place {
                 self.place_at(&def_id, world);
             }
+            if controls::menu_item(ui, ui_kit::kit(crate::icons::PART_JUNCTION), "Add routing dot").clicked() {
+                self.place_at("junction-dot", world);
+                ui.close();
+            }
         });
-        if ui
-            .button(format!("{} Add routing dot", egui_phosphor::regular::DOT_OUTLINE))
-            .clicked()
-        {
-            self.place_at("junction-dot", world);
-            ui.close();
-        }
     }
 
     /// Drop a library component at a world position.
@@ -1166,13 +1182,187 @@ impl WireLabApp {
         if let Some(c) = self.project.circuit.components.get_mut(&id) {
             c.script = Some(template.clone());
         }
-        self.script_ed.stash.remove(&id);
-        if self.script_ed.comp == Some(id) {
-            self.script_ed.buffer = template;
-        }
+        self.docs.set_buffer(id, &self.project.circuit, template);
         self.script_rev += 1;
         if !self.live.connected() {
             self.live.scripts.sync(&self.project.circuit, &self.lib);
         }
+        self.open_tab(Tab::Script(id));
+    }
+
+    /// The schematic tab: toolbar over the canvas.
+    pub fn show_schematic(&mut self, ui: &mut egui::Ui) {
+        let m = egui_theme_kit::metrics(ui.ctx());
+        egui::Panel::top("schematic-toolbar")
+            .exact_size(m.bar_h)
+            .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
+            .show_separator_line(false)
+            .show(ui, |ui| controls::bar(ui, BarKind::Tool, |ui| self.schematic_toolbar(ui)));
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.show_canvas(ui));
+    }
+
+    fn schematic_toolbar(&mut self, ui: &mut egui::Ui) {
+        let control_h = egui_theme_kit::metrics(ui.ctx()).control_h;
+        if ui_kit::tool(ui, ph::MAGNIFYING_GLASS_MINUS, "Zoom out").clicked() {
+            self.zoom_by(1.0 / 1.25);
+        }
+        ui.label(egui::RichText::new(format!("{:.0}%", self.canvas.zoom * 100.0)).monospace().weak());
+        if ui_kit::tool(ui, ph::MAGNIFYING_GLASS_PLUS, "Zoom in").clicked() {
+            self.zoom_by(1.25);
+        }
+        if ui_kit::tool(ui, ph::CORNERS_OUT, "Fit the circuit in view").clicked() {
+            self.fit_view();
+        }
+        controls::vline(ui, control_h);
+        let single = match self.selection {
+            Selection::Comp(id) => Some(id),
+            _ => None,
+        };
+        let any = !self.selection.comp_ids().is_empty();
+        if ui_kit::tool_enabled(ui, single.is_some(), ph::ARROW_CLOCKWISE, "Rotate the selected part").clicked()
+            && let Some(id) = single
+            && let Some(c) = self.project.circuit.components.get_mut(&id)
+        {
+            c.rotation = (c.rotation + 90) % 360;
+            self.topo_rev += 1;
+        }
+        if ui_kit::tool_enabled(ui, any, ph::MAGIC_WAND, "Auto wire the selection to free board pins").clicked() {
+            self.apply_auto_wire();
+        }
+        if ui_kit::tool_enabled(ui, any, ph::TRASH, "Delete the selection").clicked() {
+            for id in self.selection.comp_ids() {
+                self.project.circuit.remove_component(id);
+            }
+            self.selection = Selection::None;
+            self.topo_rev += 1;
+        }
+        if let Some(id) = single {
+            controls::vline(ui, control_h);
+            let has_script = self.project.circuit.components.get(&id).is_some_and(|c| c.script.is_some());
+            if has_script {
+                if ui_kit::button(ui, ph::FILE_CODE, "Edit script").clicked() {
+                    self.open_tab(Tab::Script(id));
+                }
+            } else if ui_kit::button(ui, ph::FILE_PLUS, "Attach script").clicked() {
+                self.attach_template_script(id);
+            }
+        }
+        if let Some(def_id) = self.canvas.placing.clone() {
+            let name = self.lib.component(&def_id).map(|d| d.name.clone()).unwrap_or(def_id);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui_kit::tool(ui, ph::X, "Stop placing (Esc)").clicked() {
+                    self.canvas.placing = None;
+                }
+                ui_kit::status(ui, ph::CURSOR_CLICK, &format!("Placing {name}"), egui_theme_kit::primary(ui));
+            });
+        }
+    }
+
+    /// Zoom around the centre of the canvas.
+    fn zoom_by(&mut self, factor: f32) {
+        let rect = self.canvas.view_rect;
+        if !rect.is_positive() {
+            return;
+        }
+        let new_zoom = (self.canvas.zoom * factor).clamp(0.25, 8.0);
+        let factor = new_zoom / self.canvas.zoom;
+        let rel = rect.center() - rect.min - self.canvas.offset;
+        self.canvas.offset += rel - rel * factor;
+        self.canvas.zoom = new_zoom;
+    }
+
+    /// Zoom and pan so the board and every part fit the canvas.
+    fn fit_view(&mut self) {
+        let rect = self.canvas.view_rect;
+        if !rect.is_positive() {
+            return;
+        }
+        let mut bounds = Rect::NOTHING;
+        if let Some(board) = self.lib.board(&self.project.circuit.board_id) {
+            let p = self.project.circuit.board_pos;
+            bounds = bounds.union(Rect::from_min_size(Pos2::new(p[0], p[1]), Vec2::new(board.width_mm, board.height_mm)));
+        }
+        for c in self.project.circuit.components.values() {
+            let Some(def) = self.lib.component(&c.def_id) else { continue };
+            let half = Vec2::splat(def.visual.width_mm.max(def.visual.height_mm) / 2.0 + 4.0);
+            bounds = bounds.union(Rect::from_center_size(Pos2::new(c.pos[0], c.pos[1]), half * 2.0));
+        }
+        if !bounds.is_positive() {
+            return;
+        }
+        let bounds = bounds.expand(6.0);
+        let zoom = ((rect.width() / bounds.width()).min(rect.height() / bounds.height()) / 4.0).clamp(0.25, 8.0);
+        self.canvas.zoom = zoom;
+        self.canvas.offset = rect.center() - rect.min - bounds.center().to_vec2() * zoom * 4.0;
+    }
+
+    /// Body rect of a placed part on screen, rotation included.
+    fn body_rect(view: &View, comp: &PlacedComponent, def: &wirelab_core::component::ComponentDef) -> Rect {
+        let (w, h) = (view.px(def.visual.width_mm), view.px(def.visual.height_mm));
+        let size = if comp.rotation % 180 == 90 { Vec2::new(h, w) } else { Vec2::new(w, h) };
+        Rect::from_center_size(view.to_screen(comp.pos), size)
+    }
+
+    /// Script badge on a part: state colour, pulsing right after a handler ran.
+    fn paint_script_badge(&self, ui: &egui::Ui, view: &View, comp: &PlacedComponent, def: &wirelab_core::component::ComponentDef, time: f64) {
+        let scripted = comp.script.is_some() || self.docs.is_dirty(comp.id, &self.project.circuit);
+        if !scripted || view.scale < 1.2 || def.visual.shape == wirelab_core::component::Shape::Dot {
+            return;
+        }
+        let errors = self.docs.diags(comp.id).iter().any(|d| d.severity == crate::rhai_lint::Severity::Error);
+        let (_, _, state_tone) = self.script_state(ui, comp.id);
+        let tone = if errors { ui.visuals().error_fg_color } else { state_tone };
+        let tone = if tone == ui.visuals().weak_text_color() { egui_theme_kit::primary(ui) } else { tone };
+        let body = Self::body_rect(view, comp, def);
+        let center = Pos2::new(body.right() + 2.0, body.top() - 2.0);
+        let r = 8.5;
+        let painter = ui.painter();
+        if let Some((_, at)) = self.live.scripts.last_fired.get(&comp.id) {
+            let age = self.live.now_ms().saturating_sub(*at) as f32 / 600.0;
+            if age < 1.0 {
+                painter.circle_stroke(center, r + 10.0 * age, Stroke::new(2.0, tone.gamma_multiply(1.0 - age)));
+                ui.ctx().request_repaint();
+            }
+        }
+        let _ = time;
+        painter.circle_filled(center, r, egui_theme_kit::tokens(ui.ctx()).raised);
+        painter.circle_stroke(center, r, Stroke::new(1.5, tone));
+        ui_kit::kit(ph::FILE_CODE).paint(ui, Rect::from_center_size(center, Vec2::splat(11.0)), 11.0, tone);
+    }
+
+    /// Hover card for a part: binding, script state, handlers and last activity.
+    fn comp_hover_card(&self, ui: &mut egui::Ui, id: CompId) {
+        let Some(comp) = self.project.circuit.components.get(&id) else { return };
+        let Some(def) = self.lib.component(&comp.def_id) else { return };
+        ui.set_max_width(320.0);
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+            crate::icons::paint_part(ui, rect, def);
+            ui.label(egui::RichText::new(self.comp_name(id)).strong());
+            ui.label(egui::RichText::new(&def.name).weak());
+        });
+        let weak = ui.visuals().weak_text_color();
+        match self.cache.bindings.gpio_of(id) {
+            Some(g) => ui_kit::status(ui, ph::PLUGS_CONNECTED, &format!("GPIO{g}"), weak),
+            None => ui_kit::status(ui, ph::LINK_BREAK, "Not bound to a GPIO", weak),
+        };
+        if comp.script.is_none() {
+            ui_kit::status(ui, ph::FILE_PLUS, "No script · double-click to add one", weak);
+            return;
+        }
+        let (icon, text, tone) = self.script_state(ui, id);
+        ui_kit::status(ui, icon, &format!("Script {}", text.to_lowercase()), tone);
+        let handlers: Vec<String> = self.live.scripts.handlers(id).into_iter().filter(|h| h.starts_with("on_")).collect();
+        if !handlers.is_empty() {
+            ui_kit::status(ui, ph::LIGHTNING, &handlers.join(" · "), weak);
+        }
+        if let Some((f, at)) = self.live.scripts.last_fired.get(&id) {
+            let ago = self.live.now_ms().saturating_sub(*at) as f32 / 1000.0;
+            ui_kit::status(ui, ph::CLOCK, &format!("{f} ran {ago:.1} s ago"), weak);
+        }
+        if let Some(err) = self.live.scripts.errors.get(&id) {
+            controls::note(ui, ui_kit::kit(ph::WARNING_CIRCLE), err, ui.visuals().error_fg_color);
+        }
+        ui.label(egui::RichText::new("Double-click to open the script").small().weak());
     }
 }

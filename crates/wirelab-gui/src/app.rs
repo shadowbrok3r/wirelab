@@ -2,9 +2,9 @@
 
 use std::path::PathBuf;
 
-use egui::{Color32, RichText};
+use egui::RichText;
 use egui_theme_kit::chrome::{self, Chrome};
-use egui_theme_kit::controls::Icon;
+use egui_theme_kit::controls::{self, BarKind, MenuButton};
 use egui_theme_kit::title_bar::{Side, TitleBar, window_edges};
 use wirelab_core::circuit::{CompId, WireId};
 use wirelab_core::engine::{Bindings, plan_setup};
@@ -15,8 +15,11 @@ use wirelab_core::validate::{Lint, validate};
 
 use crate::ai_import::{AiImportState, save_profile};
 use crate::canvas::CanvasState;
+use crate::dock::{DockRequest, Tab};
 use crate::live::LiveState;
+use crate::script_docs::ScriptDocs;
 use crate::theme::ThemeState;
+use crate::ui_kit::{self, ph};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -44,99 +47,6 @@ impl Selection {
             _ => false,
         }
     }
-}
-
-/// Per-component script editor state; unsaved buffers survive selection moves.
-#[derive(Default)]
-pub struct ScriptEditor {
-    pub comp: Option<CompId>,
-    pub buffer: String,
-    pub stash: std::collections::HashMap<CompId, String>,
-    /// Live diagnostics for the current buffer.
-    pub lint: Vec<crate::rhai_lint::LintDiag>,
-    pub lint_hash: u64,
-    pub completion: Option<Completion>,
-    /// (cursor char index, buffer hash) the popup was built for; rebuilding
-    /// only on change keeps the arrow-key selection stable.
-    pub completion_key: (usize, u64),
-}
-
-/// The script IDE: its own native window, VSCode-shaped.
-pub struct IdeState {
-    /// The IDE viewport is shown.
-    pub open: bool,
-    pub tabs: Vec<IdeTab>,
-    pub active: usize,
-    pub find_open: bool,
-    pub find: String,
-    pub replace: String,
-    /// Bottom strip (problems / console / guide), collapsible.
-    pub bottom_open: bool,
-    pub bottom_tab: IdeBottomTab,
-    /// One-shot requests from side panels, consumed by the editor.
-    pub pending_jump: Option<usize>,
-    pub pending_find: Option<FindKind>,
-    /// Inline type hints in the editor.
-    pub hints_on: bool,
-    /// Caret (line, col), 1-based, for the status bar.
-    pub cursor: (usize, usize),
-    /// One-shot snippet insertion, consumed by the editor.
-    pub pending_snippet: Option<&'static str>,
-}
-
-impl Default for IdeState {
-    fn default() -> Self {
-        IdeState {
-            open: false,
-            tabs: Vec::new(),
-            active: 0,
-            find_open: false,
-            find: String::new(),
-            replace: String::new(),
-            bottom_open: false,
-            bottom_tab: IdeBottomTab::default(),
-            pending_jump: None,
-            pending_find: None,
-            hints_on: true,
-            cursor: (1, 1),
-            pending_snippet: None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum FindKind {
-    Next,
-    Replace,
-    All,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub enum IdeBottomTab {
-    #[default]
-    Problems,
-    Console,
-    Guide,
-}
-
-#[derive(Clone, PartialEq)]
-pub enum IdeTab {
-    Comp(CompId),
-    /// Static capability / roadmap sheets, keyed.
-    Info(&'static str),
-    /// The node-graph editor.
-    Flow,
-    /// The rules program (triggers -> actions).
-    Program,
-}
-
-/// An open completion popup in the script editor.
-pub struct Completion {
-    /// (label, insert text, cursor chars back from end, detail).
-    pub items: Vec<(String, String, usize, String)>,
-    pub selected: usize,
-    /// Char index where the word being completed starts.
-    pub word_start: usize,
 }
 
 #[derive(Default)]
@@ -287,14 +197,21 @@ pub struct WireLabApp {
     pub flow_view: crate::flow_ui::FlowView,
     /// Compiled flow: (rev it was built from, Rhai source, compile errors).
     pub flow_cache: (u64, Option<String>, Vec<wirelab_core::flow::FlowError>),
-    /// Floating read-only window with the generated flow script.
+    /// The flow tab shows the generated script beside the graph.
     pub flow_code_open: bool,
     /// Inline board-tab rename in progress: (tab index, edit buffer).
     pub board_rename: Option<(usize, String)>,
-    pub script_ed: ScriptEditor,
-    pub linter: crate::rhai_lint::Linter,
-    pub ide: IdeState,
-    pub docs_open: bool,
+    /// Script buffers and diagnostics.
+    pub docs: ScriptDocs,
+    pub dock: egui_dock::DockState<Tab>,
+    /// Tab changes queued during the frame, applied around the dock pass.
+    pub dock_requests: Vec<DockRequest>,
+    /// Tabs open at the start of the dock pass.
+    pub dock_open: std::collections::HashSet<Tab>,
+    pub console_filter: String,
+    pub console_follow: bool,
+    /// Search text of the parts library.
+    pub parts_filter: String,
     pub docs_filter: String,
     /// Shipped example projects: (display name, path).
     pub examples: Vec<(String, PathBuf)>,
@@ -305,12 +222,13 @@ pub struct WireLabApp {
     pub import: ImportGate,
     /// Components to spotlight this frame (hovered warning in Checks).
     pub hover_highlight: Vec<CompId>,
-    pub wiring_open: bool,
     pub wiring_filter: String,
     pub cache: ModelCache,
     /// Custom title bar (frameless) or the system one.
     pub chrome: Chrome,
     pub theme: ThemeState,
+    /// Uploaded image of the simulated / mirrored display.
+    pub lcd_texture: crate::lcd::LcdTexture,
 }
 
 fn find_assets_dir() -> PathBuf {
@@ -389,7 +307,7 @@ impl WireLabApp {
             }
             None => None,
         };
-        WireLabApp {
+        let mut app = WireLabApp {
             lib,
             boards_dir,
             project: Project::new("untitled", &default_board),
@@ -408,65 +326,48 @@ impl WireLabApp {
             flow_cache: (0, None, Vec::new()),
             flow_code_open: false,
             board_rename: None,
-            script_ed: ScriptEditor::default(),
-            linter: crate::rhai_lint::Linter::new(),
-            ide: IdeState { bottom_open: true, ..Default::default() },
-            docs_open: false,
+            docs: ScriptDocs::default(),
+            dock: crate::dock::load_layout(cc.storage),
+            dock_requests: Vec::new(),
+            dock_open: Default::default(),
+            console_filter: String::new(),
+            console_follow: true,
+            parts_filter: String::new(),
             docs_filter: String::new(),
             examples,
             flash: crate::flash::FlashState::default(),
             mcp,
             import: ImportGate::default(),
             hover_highlight: Vec::new(),
-            wiring_open: false,
             wiring_filter: String::new(),
             cache: ModelCache::default(),
             chrome,
             theme,
+            lcd_texture: Default::default(),
+        };
+        // WIRELAB_OPEN=<project.json> opens a project at startup.
+        if let Ok(path) = std::env::var("WIRELAB_OPEN") {
+            app.load_project_path(std::path::Path::new(&path), true);
         }
+        app
     }
 
-    /// Focus (or open) a component's editor tab in the IDE window.
+    /// Focus (or open) a component's script tab.
     pub fn open_script_tab(&mut self, id: CompId) {
-        self.ide.open = true;
-        let tab = IdeTab::Comp(id);
-        if let Some(i) = self.ide.tabs.iter().position(|t| *t == tab) {
-            self.ide.active = i;
-        } else {
-            self.ide.tabs.push(tab);
-            self.ide.active = self.ide.tabs.len() - 1;
-        }
+        self.open_tab(Tab::Script(id));
     }
 
-    pub fn open_info_tab(&mut self, key: &'static str) {
-        self.ide.open = true;
-        let tab = IdeTab::Info(key);
-        if let Some(i) = self.ide.tabs.iter().position(|t| *t == tab) {
-            self.ide.active = i;
-        } else {
-            self.ide.tabs.push(tab);
-            self.ide.active = self.ide.tabs.len() - 1;
-        }
+    /// The script name of a component, as scripts address it.
+    pub fn comp_name(&self, id: CompId) -> String {
+        wirelab_core::script::component_names(&self.project.circuit, &self.lib)
+            .remove(&id)
+            .unwrap_or_else(|| format!("#{}", id.0))
     }
 
-    pub fn open_flow_tab(&mut self) {
-        self.ide.open = true;
-        if let Some(i) = self.ide.tabs.iter().position(|t| *t == IdeTab::Flow) {
-            self.ide.active = i;
-        } else {
-            self.ide.tabs.push(IdeTab::Flow);
-            self.ide.active = self.ide.tabs.len() - 1;
-        }
-    }
-
-    pub fn open_program_tab(&mut self) {
-        self.ide.open = true;
-        if let Some(i) = self.ide.tabs.iter().position(|t| *t == IdeTab::Program) {
-            self.ide.active = i;
-        } else {
-            self.ide.tabs.push(IdeTab::Program);
-            self.ide.active = self.ide.tabs.len() - 1;
-        }
+    /// Forget script buffers and their tabs; component ids now mean another circuit.
+    fn forget_scripts(&mut self) {
+        self.docs.clear();
+        self.dock_requests.push(DockRequest::CloseScripts);
     }
 
     /// Recompile the active flow graph when its revision moved.
@@ -495,7 +396,7 @@ impl WireLabApp {
         self.cache = ModelCache { rev: self.topo_rev, netlist, bindings, lints };
     }
 
-    fn log(&mut self, line: impl Into<String>) {
+    pub(crate) fn log(&mut self, line: impl Into<String>) {
         self.console.push(line.into());
         if self.console.len() > 500 {
             self.console.drain(..250);
@@ -551,7 +452,8 @@ impl WireLabApp {
         self.project = project;
         self.project_path = path;
         self.selection = Selection::None;
-        self.script_ed = crate::app::ScriptEditor::default();
+        self.forget_scripts();
+        self.canvas.fit_pending = true;
         self.topo_rev += 1;
         self.state_rev += 1;
         self.script_rev += 1;
@@ -592,13 +494,7 @@ impl WireLabApp {
         let id = self.project.boards[i].id;
         self.live = self.background.remove(&id).map(|b| b.live).unwrap_or_default();
         self.selection = Selection::None;
-        self.script_ed = crate::app::ScriptEditor::default();
-        // Component tabs belong to the previous board's circuit.
-        self.ide.tabs.retain(|t| match t {
-            IdeTab::Comp(c) => self.project.circuit.components.contains_key(c),
-            _ => true,
-        });
-        self.ide.active = self.ide.active.min(self.ide.tabs.len().saturating_sub(1));
+        self.forget_scripts();
         self.topo_rev += 1;
         self.state_rev += 1;
         self.script_rev += 1;
@@ -609,7 +505,7 @@ impl WireLabApp {
         self.stash_active_live();
         self.project.add_board(board_id);
         self.selection = Selection::None;
-        self.script_ed = crate::app::ScriptEditor::default();
+        self.forget_scripts();
         self.topo_rev += 1;
         self.state_rev += 1;
         self.script_rev += 1;
@@ -617,110 +513,97 @@ impl WireLabApp {
         self.log(format!("added {} ({})", self.project.active_name(), board_id));
     }
 
-    /// The board-tab strip: a chip per board, plus add / rename / remove.
+    /// The board strip: a pill per board (double-click renames, right-click removes) and Add board.
     fn show_board_tabs(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let active = self.project.active;
-            let count = self.project.boards.len();
-            let mut switch_to: Option<usize> = None;
-            let mut remove: Option<usize> = None;
-            let mut commit_rename = false;
+        let active = self.project.active;
+        let count = self.project.boards.len();
+        let mut switch_to: Option<usize> = None;
+        let mut remove: Option<usize> = None;
+        let mut commit_rename = false;
 
-            for i in 0..count {
-                if matches!(&self.board_rename, Some((idx, _)) if *idx == i) {
-                    // Inline rename field for this tab.
-                    if let Some((_, buf)) = &mut self.board_rename {
-                        let r = ui.add(
-                            egui::TextEdit::singleline(buf).desired_width(90.0),
-                        );
-                        r.request_focus();
-                        if r.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            commit_rename = true;
-                        }
-                    }
-                    continue;
-                }
-
-                let tab = &self.project.boards[i];
-                let is_live = if i == active {
-                    self.live.connected()
-                } else {
-                    self.background.get(&tab.id).is_some_and(|b| b.live.connected())
-                };
-                let chip = format!(
-                    "{}{}  ·  {}",
-                    if is_live { "● " } else { "" },
-                    tab.name,
-                    tab.circuit.board_id
-                );
-                let mut text = RichText::new(chip).strong();
-                if is_live {
-                    text = text.color(egui::Color32::from_rgb(90, 220, 120));
-                }
-                let resp = ui
-                    .selectable_label(i == active, text)
-                    .on_hover_text(if is_live { "session live" } else { "not connected" });
-                if resp.clicked() {
-                    switch_to = Some(i);
-                }
-                if resp.double_clicked() {
-                    self.board_rename = Some((i, self.project.boards[i].name.clone()));
-                }
-                resp.context_menu(|ui| {
-                    if ui.button("Rename").clicked() {
-                        self.board_rename = Some((i, self.project.boards[i].name.clone()));
-                        ui.close();
-                    }
-                    if count > 1 && ui.button("Remove board").clicked() {
-                        remove = Some(i);
-                        ui.close();
-                    }
-                });
-            }
-
-            if commit_rename
-                && let Some((idx, buf)) = self.board_rename.take()
+        for i in 0..count {
+            if let Some((idx, buf)) = &mut self.board_rename
+                && *idx == i
             {
-                let name = buf.trim();
-                if !name.is_empty() {
-                    self.project.boards[idx].name = name.to_string();
+                let r = controls::text_field(ui, buf, "Board name", 150.0);
+                r.request_focus();
+                if r.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    commit_rename = true;
                 }
+                continue;
             }
-
-            ui.separator();
-            let boards = self.lib.boards.keys().cloned().collect::<Vec<_>>();
-            ui.menu_button("➕ board", |ui| {
-                for id in &boards {
-                    let name = self.lib.board(id).map(|b| b.name.clone()).unwrap_or_else(|| id.clone());
-                    if ui.button(name).clicked() {
-                        self.add_board(id);
-                        ui.close();
-                    }
-                }
-            })
-            .response
-            .on_hover_text("add another ESP32 board to this project");
-
-            if let Some(i) = switch_to {
-                self.switch_board(i);
+            let tab = &self.project.boards[i];
+            let is_live = if i == active {
+                self.live.connected()
+            } else {
+                self.background.get(&tab.id).is_some_and(|b| b.live.connected())
+            };
+            let label = format!("{}  ·  {}", tab.name, tab.circuit.board_id);
+            let icon = self.lib.board(&tab.circuit.board_id).map_or(crate::icons::BOARD_DEVKIT, crate::icons::board);
+            let mut pill = controls::Pill::new(&label).icon(ui_kit::kit(icon)).selected(i == active);
+            if is_live {
+                pill = pill.tone(egui_theme_kit::success(ui));
             }
-            if let Some(i) = remove {
-                let removed_id = self.project.boards[i].id;
-                if let Some(mut bb) = self.background.remove(&removed_id) {
-                    bb.live.disconnect(&mut self.console);
+            let tip = if is_live { "Session live · double-click to rename" } else { "Not connected · double-click to rename" };
+            let resp = pill.show(ui).on_hover_text(tip);
+            if resp.clicked() {
+                switch_to = Some(i);
+            }
+            if resp.double_clicked() {
+                self.board_rename = Some((i, self.project.boards[i].name.clone()));
+            }
+            resp.context_menu(|ui| {
+                if ui_kit::menu_item(ui, ph::PENCIL_SIMPLE, "Rename").clicked() {
+                    self.board_rename = Some((i, self.project.boards[i].name.clone()));
+                    ui.close();
                 }
-                self.project.remove_board(i);
-                self.selection = Selection::None;
-                self.script_ed = crate::app::ScriptEditor::default();
-                self.topo_rev += 1;
-                self.state_rev += 1;
-                self.script_rev += 1;
-                self.flow_rev += 1;
-                if self.live.connected() {
-                    self.live.disconnect(&mut self.console);
+                if count > 1 && controls::menu_danger_item(ui, ui_kit::kit(ph::TRASH), "Remove board").clicked() {
+                    remove = Some(i);
+                    ui.close();
+                }
+            });
+        }
+
+        if commit_rename
+            && let Some((idx, buf)) = self.board_rename.take()
+        {
+            let name = buf.trim();
+            if !name.is_empty() {
+                self.project.boards[idx].name = name.to_string();
+            }
+        }
+
+        controls::vline(ui, egui_theme_kit::metrics(ui.ctx()).control_h);
+        let boards: Vec<(String, String)> = self.lib.boards.iter().map(|(id, b)| (id.clone(), b.name.clone())).collect();
+        let _ = MenuButton::new("Add board").icon(ui_kit::kit(ph::PLUS)).tip("Add another ESP32 board to this project").show(ui, |ui| {
+            for (id, name) in &boards {
+                let icon = self.lib.board(id).map_or(crate::icons::BOARD_DEVKIT, crate::icons::board);
+                if controls::menu_item(ui, ui_kit::kit(icon), name).clicked() {
+                    self.add_board(id);
+                    ui.close();
                 }
             }
         });
+
+        if let Some(i) = switch_to {
+            self.switch_board(i);
+        }
+        if let Some(i) = remove {
+            let removed_id = self.project.boards[i].id;
+            if let Some(mut bb) = self.background.remove(&removed_id) {
+                bb.live.disconnect(&mut self.console);
+            }
+            self.project.remove_board(i);
+            self.selection = Selection::None;
+            self.forget_scripts();
+            self.topo_rev += 1;
+            self.state_rev += 1;
+            self.script_rev += 1;
+            self.flow_rev += 1;
+            if self.live.connected() {
+                self.live.disconnect(&mut self.console);
+            }
+        }
     }
 
     /// Window top strip: menus and project name on the left, device controls on the right.
@@ -728,146 +611,194 @@ impl WireLabApp {
         let frameless = self.chrome.frameless;
         let _ = TitleBar::new("wirelab.title_bar", if frameless { "WireLab" } else { "" })
             .frameless(frameless)
-            .mark(Icon::glyph(egui_phosphor::regular::CIRCUITRY))
+            .mark(ui_kit::kit(ph::CIRCUITRY))
             .show(ui, |ui, side| match side {
                 Side::Left => self.show_menus(ui),
                 Side::Right => self.show_device_bar(ui),
             });
     }
 
+    fn new_project(&mut self) {
+        let board = self.project.circuit.board_id.clone();
+        self.adopt_project(Project::new("untitled", &board), None);
+    }
+
     fn show_menus(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("File", |ui| {
-            if ui.button("New").clicked() {
-                self.live.disconnect(&mut self.console);
-                for (_, mut bb) in self.background.drain() {
-                    bb.live.disconnect(&mut self.console);
-                }
-                let board = self.project.circuit.board_id.clone();
-                self.project = Project::new("untitled", &board);
-                self.project_path = None;
-                self.selection = Selection::None;
-                self.topo_rev += 1;
-                self.flow_rev += 1;
+        let _ = MenuButton::new("File").show(ui, |ui| {
+            if ui_kit::menu_item(ui, ph::FILE_PLUS, "New project").clicked() {
+                self.new_project();
                 ui.close();
             }
-            if ui.button("Open…").clicked() {
+            if ui_kit::menu_item(ui, ph::FOLDER_OPEN, "Open…").clicked() {
                 self.open_project();
                 ui.close();
             }
-            if ui.button("Save").clicked() {
+            if ui_kit::menu_item(ui, ph::FLOPPY_DISK, "Save").clicked() {
                 self.save_project(false);
                 ui.close();
             }
-            if ui.button("Save as…").clicked() {
+            if ui_kit::menu_item(ui, ph::EXPORT, "Save as…").clicked() {
                 self.save_project(true);
                 ui.close();
             }
-        });
-        ui.menu_button("Tools", |ui| {
-            if ui
-                .button(if self.ide.open { "📜 Hide IDE" } else { "📜 Open IDE" })
-                .on_hover_text("the script IDE window (editors, hardware tree, problems)")
-                .clicked()
-            {
-                self.ide.open = !self.ide.open;
-                ui.close();
-            }
             if !self.examples.is_empty() {
-                ui.menu_button("Examples", |ui| {
-                    let examples = self.examples.clone();
+                controls::menu_separator(ui);
+                let examples = self.examples.clone();
+                let _ = controls::submenu(ui, ui_kit::kit(ph::BOOK_OPEN), "Examples", |ui| {
                     for (name, path) in &examples {
-                        if ui.button(name).clicked() {
-                            // Examples never save back over the shipped file.
+                        // Examples never save back over the shipped file.
+                        if ui_kit::menu_item(ui, ph::FILE, name).clicked() {
                             self.load_project_path(path, false);
                             ui.close();
                         }
                     }
                 });
             }
-            if ui
-                .button("✨ AI board import")
-                .on_hover_text("turn a manufacturer pinout/spec into a board profile")
+        });
+        let _ = MenuButton::new("View").keep_open(true).show(ui, |ui| {
+            for tab in Tab::PANELS {
+                let open = self.dock.find_tab(&tab).is_some();
+                if controls::menu_check_item(ui, ui_kit::kit(tab.icon()), tab.label(), open).clicked() {
+                    let request = if open && tab != Tab::Schematic { DockRequest::Close(tab) } else { DockRequest::Open(tab) };
+                    self.dock_requests.push(request);
+                }
+            }
+            controls::menu_separator(ui);
+            if ui_kit::menu_item(ui, ph::LAYOUT, "Reset layout").clicked() {
+                self.dock_requests.push(DockRequest::Reset);
+                ui.close();
+            }
+            controls::menu_separator(ui);
+            let _ = chrome::toggle_row(ui, &mut self.chrome, "Custom title bar");
+            if ui_kit::menu_item(ui, ph::PALETTE, "Theme settings…").clicked() {
+                self.theme.picker.open = true;
+                ui.close();
+            }
+            if ui_kit::menu_item(ui, ph::SQUARES_FOUR, "Icon gallery").clicked() {
+                egui_icon_pack::gallery::toggle(ui.ctx());
+                ui.close();
+            }
+        });
+        let _ = MenuButton::new("Tools").show(ui, |ui| {
+            if ui_kit::menu_item(ui, ph::SPARKLE, "AI board import…")
+                .on_hover_text("Turn a manufacturer pinout or spec into a board profile")
                 .clicked()
             {
                 self.ai.open = true;
                 ui.close();
             }
-            ui.separator();
             self.mcp_submenu(ui);
         });
-        ui.menu_button("View", |ui| {
-            let _ = chrome::toggle_row(ui, &mut self.chrome, "Custom title bar");
-            ui.separator();
-            if ui.button("Theme settings…").clicked() {
-                self.theme.picker.open = true;
-                ui.close();
-            }
-            if ui.button("Icon gallery").on_hover_text("browse the part, category and board icons").clicked() {
-                egui_icon_pack::gallery::toggle(ui.ctx());
-                ui.close();
-            }
-        });
-        ui.separator();
-        ui.label("project");
-        ui.add(egui::TextEdit::singleline(&mut self.project.name).desired_width(140.0));
+        controls::vline(ui, egui_theme_kit::metrics(ui.ctx()).control_h);
+        controls::TextField::new(&mut self.project.name).hint("Project name").icon(ui_kit::kit(ph::CIRCUITRY)).width(170.0).show(ui);
         if let Selection::Comps(v) = &self.selection
-            && v.len() >= 2 {
-                let n = v.len();
-                if ui
-                    .button(RichText::new(format!("⚡ Auto wire ({n})")).strong())
-                    .on_hover_text("wire the selected components to free board pins")
-                    .clicked()
-                {
-                    self.apply_auto_wire();
-                }
+            && v.len() >= 2
+        {
+            let label = format!("Auto wire ({})", v.len());
+            if ui_kit::button(ui, ph::MAGIC_WAND, &label)
+                .on_hover_text("Wire the selected parts to free board pins")
+                .clicked()
+            {
+                self.apply_auto_wire();
             }
+        }
     }
 
-    /// The MCP-server submenu: status, connect string, and a start/stop toggle.
+    /// The MCP server: status, connect command, start / stop.
     fn mcp_submenu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("🤖 MCP server", |ui| {
-            let running = self.mcp.is_some();
-            if let Some(server) = &self.mcp {
-                ui.label(
-                    RichText::new("● running").color(egui::Color32::from_rgb(90, 220, 120)),
-                );
-                ui.label(RichText::new(server.addr.to_string()).monospace().small());
-                ui.label(
-                    RichText::new(format!("claude mcp add -t http wirelab {}", server.addr))
-                        .monospace()
-                        .small()
-                        .color(egui::Color32::from_gray(150)),
-                );
-            } else {
-                ui.label(RichText::new("○ stopped").weak());
-            }
-            ui.separator();
-            if ui.button(if running { "Stop server" } else { "Start server" }).clicked() {
-                if running {
-                    self.mcp = None;
-                    self.console.push("MCP server stopped".into());
-                } else {
-                    let port = std::env::var("WIRELAB_MCP_PORT")
-                        .ok()
-                        .and_then(|p| p.parse().ok())
-                        .unwrap_or(crate::mcp::DEFAULT_PORT);
-                    match crate::mcp::McpServer::start(port, ui.ctx().clone()) {
-                        Ok(server) => {
-                            self.console.push(format!("MCP server at {}", server.addr));
-                            self.console.push(format!(
-                                "  connect: claude mcp add -t http wirelab {}",
-                                server.addr
-                            ));
-                            self.mcp = Some(server);
-                        }
-                        Err(e) => self.console.push(format!("MCP start failed: {e}")),
+        let running = self.mcp.as_ref().map(|s| s.addr.clone());
+        let _ = controls::submenu(ui, ui_kit::kit(ph::ROBOT), "MCP server", |ui| {
+            match running {
+                Some(addr) => {
+                    controls::menu_inset_row(ui, |ui| {
+                        ui_kit::status(ui, ph::PULSE, &format!("Running at {addr}"), egui_theme_kit::success(ui))
+                    });
+                    let cmd = format!("claude mcp add -t http wirelab {addr}");
+                    if ui_kit::menu_item(ui, ph::COPY, "Copy connect command").on_hover_text(&cmd).clicked() {
+                        ui.ctx().copy_text(cmd);
+                        ui.close();
+                    }
+                    if ui_kit::menu_item(ui, ph::STOP, "Stop server").clicked() {
+                        self.mcp = None;
+                        self.log("MCP server stopped");
+                        ui.close();
                     }
                 }
-                ui.close();
+                None => {
+                    let weak = ui.visuals().weak_text_color();
+                    controls::menu_inset_row(ui, |ui| ui_kit::status(ui, ph::CIRCLE_DASHED, "Stopped", weak));
+                    if ui_kit::menu_item(ui, ph::PLAY, "Start server").clicked() {
+                        let port = std::env::var("WIRELAB_MCP_PORT")
+                            .ok()
+                            .and_then(|p| p.parse().ok())
+                            .unwrap_or(crate::mcp::DEFAULT_PORT);
+                        match crate::mcp::McpServer::start(port, ui.ctx().clone()) {
+                            Ok(server) => {
+                                self.log(format!("MCP server at {}", server.addr));
+                                self.log(format!("  connect: claude mcp add -t http wirelab {}", server.addr));
+                                self.mcp = Some(server);
+                            }
+                            Err(e) => self.log(format!("MCP start failed: {e}")),
+                        }
+                        ui.close();
+                    }
+                }
             }
-        })
-        .response
-        .on_hover_text("AI assistance over MCP: build, validate, script, read live telemetry");
+        });
+    }
+
+    /// Bottom status line: link, board, scripts, problems, program and MCP state.
+    fn show_status_bar(&mut self, ui: &mut egui::Ui) {
+        use wirelab_link::SessionPhase;
+        let weak = ui.visuals().weak_text_color();
+        let control_h = egui_theme_kit::metrics(ui.ctx()).control_h;
+        let backend = match self.live.backend {
+            crate::live::Backend::Simulator => "simulator",
+            crate::live::Backend::Serial => "USB serial",
+            crate::live::Backend::Tcp => "Wi-Fi",
+        };
+        let (icon, text, tone) = match self.live.session.as_ref().map(|s| s.phase) {
+            Some(SessionPhase::Ready) => (ph::PLUGS_CONNECTED, format!("Live · {backend}"), egui_theme_kit::success(ui)),
+            Some(SessionPhase::AwaitingHello) => (ph::HOURGLASS, format!("Connecting · {backend}"), ui.visuals().warn_fg_color),
+            Some(SessionPhase::Dead) => (ph::PLUG, "Link lost".to_string(), ui.visuals().error_fg_color),
+            None => (ph::PLUG, "Offline".to_string(), weak),
+        };
+        ui_kit::status(ui, icon, &text, tone);
+        controls::vline(ui, control_h);
+        let board = self.lib.board(&self.project.circuit.board_id).map(|b| b.name.clone()).unwrap_or_default();
+        ui_kit::status(ui, ph::CPU, &format!("{} · {board}", self.project.active_name()), weak);
+        controls::vline(ui, control_h);
+        let scripted = self.project.circuit.components.values().filter(|c| c.script.is_some()).count();
+        let scripts = if scripted == 1 { "1 script".to_string() } else { format!("{scripted} scripts") };
+        if ui_kit::status(ui, ph::FILE_CODE, &scripts, weak).on_hover_text("Open the Explorer").clicked() {
+            self.open_tab(Tab::Explorer);
+        }
+        let (errors, warnings) = self.docs.counts();
+        let checks = self.cache.lints.len() + self.cache.bindings.warnings.len();
+        let problems = if errors + warnings == 0 {
+            ui_kit::status(ui, ph::CHECK_CIRCLE, "No script problems", weak)
+        } else {
+            let tone = if errors > 0 { ui.visuals().error_fg_color } else { ui.visuals().warn_fg_color };
+            ui_kit::status(ui, ph::BUG, &format!("{errors} errors · {warnings} warnings"), tone)
+        };
+        if problems.on_hover_text("Open the Problems panel").clicked() {
+            self.open_tab(Tab::Problems);
+        }
+        if checks > 0
+            && ui_kit::status(ui, ph::SHIELD_WARNING, &format!("{checks} circuit checks"), ui.visuals().warn_fg_color)
+                .on_hover_text("Open the Checks panel")
+                .clicked()
+        {
+            self.open_tab(Tab::Checks);
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if let Some(server) = &self.mcp {
+                ui_kit::status(ui, ph::ROBOT, &format!("MCP {}", server.addr), weak);
+            }
+            if self.live.program_running {
+                ui_kit::status(ui, ph::LIST_CHECKS, "Rules running", egui_theme_kit::success(ui));
+            }
+        });
     }
 
     fn show_ai_window(&mut self, ctx: &egui::Context) {
@@ -907,7 +838,7 @@ impl WireLabApp {
                     let can_go = !self.ai.busy
                         && !self.ai.spec_text.trim().is_empty()
                         && !self.ai.board_name.trim().is_empty();
-                    if ui.add_enabled(can_go, egui::Button::new("Generate profile")).clicked() {
+                    if ui_kit::primary(ui, can_go, ph::SPARKLE, "Generate").on_hover_text("Generate a board profile").clicked() {
                         self.ai.start();
                     }
                     if self.ai.busy {
@@ -935,9 +866,9 @@ impl WireLabApp {
                         ui.colored_label(warn_color, format!("⚠ {p}"));
                     }
                     if self.ai.problems.is_empty() {
-                        ui.colored_label(Color32::from_rgb(90, 220, 120), "profile passes all checks");
+                        ui_kit::status(ui, ph::SEAL_CHECK, "Profile passes all checks", egui_theme_kit::success(ui));
                     }
-                    if ui.button("Add to library & save").clicked() {
+                    if ui_kit::primary(ui, true, ph::FLOPPY_DISK, "Add to library").on_hover_text("Add the profile to the board library and save it").clicked() {
                         adopt = Some(profile.clone());
                     }
                 }
@@ -1000,10 +931,10 @@ impl WireLabApp {
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.button("Decline").clicked() {
+                if ui_kit::button(ui, ph::X, "Decline").clicked() {
                     decline = true;
                 }
-                if ui.button(RichText::new("Replace project").strong()).clicked() {
+                if ui_kit::primary(ui, true, ph::DOWNLOAD_SIMPLE, "Replace project").clicked() {
                     accept = true;
                 }
             });
@@ -1130,6 +1061,7 @@ impl eframe::App for WireLabApp {
         let mut log = std::mem::take(&mut self.console);
         let flashing = self.flash.poll(&mut log);
         self.console = log;
+        self.docs.refresh(&self.project.circuit, &self.lib, &self.live.scripts);
         if ticked || bg_ticked || self.ai.busy || flashing {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         }
@@ -1137,46 +1069,26 @@ impl eframe::App for WireLabApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let m = egui_theme_kit::metrics(&ctx);
+        let fill = ui.visuals().panel_fill;
 
         self.show_title_bar(ui);
-        egui::Panel::top("board-tabs").show(ui, |ui| {
-            self.show_board_tabs(ui);
-        });
-        egui::Panel::left("palette")
-            .resizable(true)
-            .default_size(210.0)
-            .show(ui, |ui| self.show_palette(ui));
-        egui::Panel::right("inspector")
-            .resizable(true)
-            .default_size(300.0)
-            .show(ui, |ui| self.show_right_panel(ui));
-        egui::Panel::bottom("bottom")
-            .resizable(true)
-            .default_size(280.0)
-            .show(ui, |ui| self.show_bottom(ui));
-        egui::CentralPanel::no_frame().show(ui, |ui| self.show_canvas(ui));
+        egui::Panel::top("board-strip")
+            .exact_size(m.bar_h)
+            .frame(egui::Frame::NONE.fill(fill))
+            .show_separator_line(false)
+            .show(ui, |ui| controls::bar(ui, BarKind::Tool, |ui| self.show_board_tabs(ui)));
+        egui::Panel::bottom("status-bar")
+            .exact_size(m.header_h)
+            .frame(egui::Frame::NONE.fill(fill))
+            .show_separator_line(false)
+            .show(ui, |ui| controls::bar(ui, BarKind::Status, |ui| self.show_status_bar(ui)));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(egui_theme_kit::tokens(&ctx).base))
+            .show(ui, |ui| self.show_dock(ui));
 
         self.show_ai_window(&ctx);
         self.show_import_modal(&ctx);
-        crate::rhai_docs::show_docs_window(&ctx, &mut self.docs_open, &mut self.docs_filter);
-        crate::wiring_guide::show_wiring_window(&ctx, &mut self.wiring_open, &mut self.wiring_filter);
-
-        if self.ide.open {
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("wirelab-ide"),
-                egui::ViewportBuilder::default()
-                    .with_title("WireLab — Script IDE")
-                    .with_inner_size([1060.0, 640.0])
-                    .with_min_inner_size([620.0, 360.0]),
-                |vui, _class| {
-                    self.show_ide(vui);
-                    if vui.ctx().input(|i| i.viewport().close_requested()) {
-                        self.ide.open = false;
-                    }
-                },
-            );
-        }
-
         self.theme.show(&ctx);
         egui_icon_pack::gallery::show_window(&ctx, &crate::icons::PACK);
         if let Some(e) = chrome::take_save_error(&ctx) {
@@ -1185,6 +1097,10 @@ impl eframe::App for WireLabApp {
         if self.chrome.frameless {
             window_edges(ui);
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        crate::dock::save_layout(&self.dock, storage);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

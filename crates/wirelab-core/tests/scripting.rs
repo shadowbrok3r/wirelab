@@ -271,6 +271,42 @@ fn script_beep_continuation_survives_program_stop() {
 }
 
 #[test]
+fn check_handlers_and_activity_describe_a_script() {
+    let lib = mini_lib();
+    let (mut circuit, _led, btn) = btn_led_circuit(&lib);
+    let src = "fn on_press() { led.on(); }\nfn on_tick(dt) { }\nfn helper() { }\n";
+    let (mut host, _engine) = host_for(&mut circuit, &lib, btn, src);
+    assert_eq!(host.handlers(btn), vec!["on_press", "on_tick", "helper"]);
+
+    assert!(host.check(src).is_ok());
+    let (msg, at) = host.check("fn on_press() {\n    led.on(;\n}\n").unwrap_err();
+    assert!(!msg.is_empty());
+    assert_eq!(at.map(|(line, _)| line), Some(2));
+
+    host.set_world(World { now_ms: 1234, ..Default::default() });
+    host.tick(1234);
+    assert!(!host.last_fired.contains_key(&btn), "on_tick is not activity");
+    host.on_press(btn);
+    assert_eq!(host.last_fired.get(&btn), Some(&("on_press".to_string(), 1234)));
+}
+
+#[test]
+fn restart_all_clears_state_and_timers() {
+    let lib = mini_lib();
+    let (mut circuit, _led, btn) = btn_led_circuit(&lib);
+    let src = "fn on_start() { this.n = (this.n ?? 0) + 1; log(this.n); after(500, || led.on()); }";
+    let (mut host, _engine) = host_for(&mut circuit, &lib, btn, src);
+    host.on_start(btn);
+    host.on_start(btn);
+    assert_eq!(host.take_logs(), vec!["[btn] 1".to_string(), "[btn] 2".to_string()]);
+
+    assert_eq!(host.restart_all(), vec![btn]);
+    assert!(host.tick(1000).is_empty(), "pending timers were dropped");
+    host.on_start(btn);
+    assert_eq!(host.take_logs(), vec!["[btn] 1".to_string()]);
+}
+
+#[test]
 fn script_actions_after_a_beep_are_not_deferred() {
     let lib = mini_lib();
     let (mut circuit, _led, btn) = btn_led_circuit(&lib);

@@ -3,7 +3,7 @@
 //! this", and ⚡ Auto wire is the "just do it for me".
 
 /// (title, body) sections; code fences render monospaced.
-const SECTIONS: &[(&str, &str)] = &[
+pub const SECTIONS: &[(&str, &str)] = &[
     (
         "The one rule: current flows in loops",
         "Electricity only does something when it can flow in a complete loop: \
@@ -112,18 +112,14 @@ const SECTIONS: &[(&str, &str)] = &[
     (
         "Let WireLab do the wiring",
         "Three levels of help, laziest first:\n\
-         • **⚡ Auto wire** — box-select components (drag on empty canvas), \
-         then the toolbar button or right-click wires them to sensible free \
-         pins: buttons get pull-ups, LEDs pick up a selected resistor in \
-         series, pots land on ADC pins.\n\
+         • **Auto wire** — box-select components (drag on empty canvas), \
+         then the Schematic toolbar's magic-wand button or right-click wires \
+         them to sensible free pins: buttons get pull-ups, LEDs pick up a \
+         selected resistor in series, pots land on ADC pins.\n\
          • **Splice** — hover a wire while placing a two-terminal part: the \
          leads preview snapping in; click and it's inserted in series.\n\
-         • **Checks fixes** — warnings in the Inspector highlight the parts \
-         involved when hovered, and the 🔧 button applies the suggested \
+         • **Checks fixes** — rows in the Checks panel highlight the parts \
+         involved when hovered, and the wrench button applies the suggested \
          remedy (like adding that LED resistor, value pre-computed).",
     ),
 ];
-
-pub fn show_wiring_window(ctx: &egui::Context, open: &mut bool, filter: &mut String) {
-    crate::rhai_docs::show_reference_window(ctx, "🔌 Wiring guide", SECTIONS, open, filter);
-}

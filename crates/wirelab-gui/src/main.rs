@@ -3,20 +3,26 @@
 mod ai_import;
 mod app;
 mod canvas;
+mod console;
+mod dock;
 mod draw;
+mod editor;
+mod explorer;
 mod flash;
 mod flow_ui;
 mod http_fetch;
 mod icons;
-mod ide;
 mod ide_snippets;
+mod lcd;
 mod live;
 mod mcp;
 mod panels;
 mod panels_info;
 mod rhai_docs;
 mod rhai_lint;
+mod script_docs;
 mod theme;
+mod ui_kit;
 mod wiring_guide;
 
 use egui_theme_kit::chrome;

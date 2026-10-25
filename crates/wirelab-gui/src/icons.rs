@@ -90,7 +90,10 @@ pub fn category(name: &str) -> Icon {
 
 pub fn board(profile: &BoardProfile) -> Icon {
     let id = profile.id.to_ascii_lowercase();
-    if ["lcd", "tft", "oled", "display"].iter().any(|k| id.contains(k)) {
+    if ["lcd", "tft", "oled", "display"]
+        .iter()
+        .any(|k| id.contains(k))
+    {
         BOARD_LCD
     } else {
         BOARD_DEVKIT
@@ -122,13 +125,6 @@ pub fn paint_part(ui: &Ui, rect: Rect, def: &ComponentDef) {
     }
 }
 
-/// Paints `icon` in the text colour with a soft back layer.
-pub fn paint_plain(ui: &Ui, rect: Rect, icon: Icon) {
-    let size = rect.width().min(rect.height());
-    let fg = ui.visuals().text_color();
-    icon.paint_duo(ui, rect, size, fg, fg.gamma_multiply(0.3));
-}
-
 /// Four-band colour code: two digits, multiplier, gold (5 %) tolerance.
 pub fn color_code(ohms: f32) -> Option<[Color32; 4]> {
     let ohms = f64::from(ohms);
@@ -147,11 +143,18 @@ pub fn color_code(ohms: f32) -> Option<[Color32; 4]> {
         0..=9 => DIGIT[exp as usize],
         _ => return None,
     };
-    Some([DIGIT[(digits / 10) as usize], DIGIT[(digits % 10) as usize], multiplier, GOLD])
+    Some([
+        DIGIT[(digits / 10) as usize],
+        DIGIT[(digits % 10) as usize],
+        multiplier,
+        GOLD,
+    ])
 }
 
 fn paint_bands(ui: &Ui, rect: Rect, size: f32, ohms: f32) {
-    let Some(colors) = color_code(ohms) else { return };
+    let Some(colors) = color_code(ohms) else {
+        return;
+    };
     let square = snapped_square(rect.center(), size, ui.pixels_per_point());
     let unit = square.width() / 256.0;
     let at = |x: f32, y: f32| pos2(square.left() + x * unit, square.top() + y * unit);
@@ -174,21 +177,31 @@ mod tests {
 
     fn shipped() -> Library {
         let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets");
-        Library::load(&assets.join("boards"), &assets.join("components")).expect("shipped library loads")
+        Library::load(&assets.join("boards"), &assets.join("components"))
+            .expect("shipped library loads")
     }
 
     #[test]
     fn every_shipped_part_has_a_specific_icon() {
         for def in shipped().components.values() {
             let icon = part(def);
-            assert!(icon != PART_CHIP && icon != PART_SENSOR, "{} falls back to {}", def.id, icon.name());
+            assert!(
+                icon != PART_CHIP && icon != PART_SENSOR,
+                "{} falls back to {}",
+                def.id,
+                icon.name()
+            );
         }
     }
 
     #[test]
     fn every_shipped_category_has_its_own_icon() {
         for def in shipped().components.values() {
-            assert!(category(&def.category) != CAT_OTHER, "category '{}' has no icon", def.category);
+            assert!(
+                category(&def.category) != CAT_OTHER,
+                "category '{}' has no icon",
+                def.category
+            );
         }
     }
 
@@ -196,12 +209,17 @@ mod tests {
     fn buzzers_split_by_drive() {
         let lib = shipped();
         assert_eq!(part(lib.component("buzzer-active").unwrap()), PART_BUZZER);
-        assert_eq!(part(lib.component("buzzer-passive").unwrap()), PART_BUZZER_TONE);
+        assert_eq!(
+            part(lib.component("buzzer-passive").unwrap()),
+            PART_BUZZER_TONE
+        );
     }
 
     #[test]
     fn resistor_colour_codes() {
-        let (r, v, y, o, k, n, g) = (DIGIT[2], DIGIT[7], DIGIT[4], DIGIT[3], DIGIT[0], DIGIT[1], DIGIT[5]);
+        let (r, v, y, o, k, n, g) = (
+            DIGIT[2], DIGIT[7], DIGIT[4], DIGIT[3], DIGIT[0], DIGIT[1], DIGIT[5],
+        );
         assert_eq!(color_code(220.0), Some([r, r, n, GOLD]));
         assert_eq!(color_code(330.0), Some([o, o, n, GOLD]));
         assert_eq!(color_code(1_000.0), Some([n, k, r, GOLD]));

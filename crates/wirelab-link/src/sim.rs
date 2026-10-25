@@ -182,7 +182,7 @@ impl SimDevice {
                 }
             }
             let mut analog = wirelab_proto::heapless::Vec::<AnalogSample, MAX_ANALOG_SAMPLES>::new();
-            for (&gpio, _) in self.watched_analog.iter() {
+            for &gpio in self.watched_analog.keys() {
                 if let Some(&mv) = out.analog_mv.get(&gpio) {
                     let _ = analog.push(AnalogSample { pin: gpio, millivolts: mv });
                 }
@@ -301,41 +301,11 @@ impl SimDevice {
             HostMsg::SetRgb { r, g, b, .. } => {
                 self.rgb = Some([*r, *g, *b]);
             }
-            HostMsg::LcdInit { .. } => {
-                self.lcd = Some(vec![wirelab_core::sim::LcdOp::Clear([0, 0, 0])]);
-            }
-            HostMsg::LcdClear { rgb565 } => {
-                if let Some(ops) = &mut self.lcd {
-                    ops.clear();
-                    ops.push(wirelab_core::sim::LcdOp::Clear(wirelab_core::sim::rgb888(*rgb565)));
-                }
-            }
-            HostMsg::LcdRect { x, y, w, h, rgb565 } => {
-                if let Some(ops) = &mut self.lcd {
-                    ops.push(wirelab_core::sim::LcdOp::Rect {
-                        x: *x,
-                        y: *y,
-                        w: *w,
-                        h: *h,
-                        rgb: wirelab_core::sim::rgb888(*rgb565),
-                    });
-                    if ops.len() > 512 {
-                        ops.drain(..256);
-                    }
-                }
-            }
-            HostMsg::LcdText { x, y, rgb565, text } => {
-                if let Some(ops) = &mut self.lcd {
-                    ops.push(wirelab_core::sim::LcdOp::Text {
-                        x: *x,
-                        y: *y,
-                        rgb: wirelab_core::sim::rgb888(*rgb565),
-                        text: text.to_string(),
-                    });
-                    if ops.len() > 512 {
-                        ops.drain(..256);
-                    }
-                }
+            HostMsg::LcdInit { .. }
+            | HostMsg::LcdClear { .. }
+            | HostMsg::LcdRect { .. }
+            | HostMsg::LcdText { .. } => {
+                wirelab_core::sim::apply_lcd_msg(&mut self.lcd, msg);
             }
             // Generic buses: SPI echoes the written bytes; I2C reads answer
             // from virtual sensors (0x76/0x44) and zero-fill other addresses.

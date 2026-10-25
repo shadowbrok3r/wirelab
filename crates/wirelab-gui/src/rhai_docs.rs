@@ -1,6 +1,5 @@
 //! Built-in reference for component scripts: WireLab API + Rhai language.
 
-use egui::RichText;
 use egui_extras::syntax_highlighting::{CodeTheme, code_view_ui};
 
 /// (title, body) sections; code blocks are fenced with ``` lines.
@@ -159,63 +158,51 @@ pub fn reference_text() -> String {
         .join("\n")
 }
 
-/// Floating reference window, filterable.
-pub fn show_docs_window(ctx: &egui::Context, open: &mut bool, filter: &mut String) {
-    show_reference_window(ctx, "📖 Script reference", SECTIONS, open, filter);
+/// Filterable, sectioned reference as tab content.
+pub fn show_reference(ui: &mut egui::Ui, id: &str, sections: &[(&str, &str)], filter: &mut String) {
+    let width = ui.available_width().min(360.0);
+    egui_theme_kit::controls::search_field(ui, filter, "Filter", width);
+    ui.add_space(egui_theme_kit::metrics(ui.ctx()).gap.y);
+    let theme = CodeTheme::from_memory(ui.ctx(), ui.style());
+    let needle = filter.to_lowercase();
+    egui::ScrollArea::vertical().id_salt(id).auto_shrink([false, false]).show(ui, |ui| {
+        for (i, (title, body)) in sections.iter().enumerate() {
+            if !needle.is_empty() && !title.to_lowercase().contains(&needle) && !body.to_lowercase().contains(&needle) {
+                continue;
+            }
+            let open = egui_theme_kit::controls::Section::new((id, i), title)
+                .default_open(i == 0)
+                .open((!needle.is_empty()).then_some(true))
+                .header(ui);
+            if !open {
+                continue;
+            }
+            for (j, chunk) in body.split("```").enumerate() {
+                if chunk.trim().is_empty() {
+                    continue;
+                }
+                if j % 2 == 0 {
+                    ui.label(chunk.trim_matches('\n'));
+                } else {
+                    code_view_ui(ui, &theme, chunk.trim_matches('\n'), "rs");
+                }
+            }
+        }
+    });
 }
 
-/// Shared renderer for filterable, sectioned reference windows.
-pub fn show_reference_window(
-    ctx: &egui::Context,
-    title: &str,
-    sections: &[(&str, &str)],
-    open: &mut bool,
-    filter: &mut String,
-) {
-    if !*open {
-        return;
+impl crate::app::WireLabApp {
+    pub fn show_reference_tab(&mut self, ui: &mut egui::Ui) {
+        show_reference(ui, "rhai-reference", SECTIONS, &mut self.docs_filter);
     }
-    let mut still_open = *open;
-    egui::Window::new(title)
-        .open(&mut still_open)
-        .default_width(560.0)
-        .default_height(520.0)
-        .vscroll(false)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("filter");
-                ui.add(egui::TextEdit::singleline(filter).desired_width(220.0));
-                if !filter.is_empty() && ui.small_button("✖").clicked() {
-                    filter.clear();
-                }
-            });
-            ui.separator();
-            let theme = CodeTheme::from_memory(ui.ctx(), ui.style());
-            let needle = filter.to_lowercase();
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for (i, (title, body)) in sections.iter().enumerate() {
-                    if !needle.is_empty()
-                        && !title.to_lowercase().contains(&needle)
-                        && !body.to_lowercase().contains(&needle)
-                    {
-                        continue;
-                    }
-                    egui::CollapsingHeader::new(RichText::new(*title).strong())
-                        .default_open(i == 0 || !needle.is_empty())
-                        .show(ui, |ui| {
-                            for (j, chunk) in body.split("```").enumerate() {
-                                if chunk.trim().is_empty() {
-                                    continue;
-                                }
-                                if j % 2 == 0 {
-                                    ui.label(chunk.trim_matches('\n'));
-                                } else {
-                                    code_view_ui(ui, &theme, chunk.trim_matches('\n'), "rs");
-                                }
-                            }
-                        });
-                }
-            });
+
+    pub fn show_wiring_tab(&mut self, ui: &mut egui::Ui) {
+        show_reference(ui, "wiring-guide", crate::wiring_guide::SECTIONS, &mut self.wiring_filter);
+    }
+
+    pub fn show_info_tab(&mut self, ui: &mut egui::Ui, key: &str) {
+        egui::ScrollArea::vertical().id_salt(("info", key)).auto_shrink([false, false]).show(ui, |ui| {
+            ui.label(egui::RichText::new(crate::panels_info::ide_info(self, key)).monospace());
         });
-    *open = still_open;
+    }
 }

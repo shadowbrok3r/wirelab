@@ -265,6 +265,8 @@ pub struct ScriptHost {
     names: HashMap<CompId, String>,
     /// Latest compile/runtime error per component, cleared on success.
     pub errors: HashMap<CompId, String>,
+    /// Last handler (or "timer") that ran per component, with its world time in ms; `on_tick` is not recorded.
+    pub last_fired: HashMap<CompId, (String, u64)>,
     last_reading: HashMap<CompId, u16>,
 }
 
@@ -581,6 +583,7 @@ impl ScriptHost {
             instances: HashMap::new(),
             names: HashMap::new(),
             errors: HashMap::new(),
+            last_fired: HashMap::new(),
             last_reading: HashMap::new(),
         }
     }
@@ -594,10 +597,51 @@ impl ScriptHost {
         self.instances.contains_key(&comp)
     }
 
+    /// Functions a compiled script defines, in source order.
+    pub fn handlers(&self, comp: CompId) -> Vec<String> {
+        let Some(inst) = self.instances.get(&comp) else { return Vec::new() };
+        let at = |name: &str| {
+            inst.src
+                .match_indices(&format!("fn {name}"))
+                .find(|(i, m)| {
+                    let next = inst.src[i + m.len()..].chars().next();
+                    !next.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                })
+                .map_or(usize::MAX, |(i, _)| i)
+        };
+        let mut names: Vec<String> = inst.handlers.iter().map(|(n, _)| n.clone()).collect();
+        names.sort_by_key(|n| at(n));
+        names.dedup();
+        names
+    }
+
+    /// Compiles `src` with the live engine without running it; the error and its 1-based (line, column).
+    pub fn check(&self, src: &str) -> Result<(), (String, Option<(usize, usize)>)> {
+        match self.engine.compile(src) {
+            Ok(_) => Ok(()),
+            Err(e) => Err((e.0.to_string(), e.1.line().zip(e.1.position()))),
+        }
+    }
+
     /// Components with a compiled script instance (the flow included, so
     /// broadcast events reach it).
     pub fn scripted(&self) -> Vec<CompId> {
         self.instances.keys().copied().collect()
+    }
+
+    /// Restarts every instance as after a device reset: empty `this`, no pending timers.
+    ///
+    /// Returns the restarted ids so the caller can fire `on_start`.
+    pub fn restart_all(&mut self) -> Vec<CompId> {
+        let now = self.shared.world.borrow().now_ms;
+        self.shared.timers.borrow_mut().clear();
+        self.last_reading.clear();
+        self.last_fired.clear();
+        for inst in self.instances.values_mut() {
+            inst.state = Dynamic::from(rhai::Map::new());
+            inst.last_tick_ms = now;
+        }
+        self.scripted()
     }
 
     /// Diff circuit scripts against compiled instances; returns freshly
@@ -624,6 +668,7 @@ impl ScriptHost {
             .borrow_mut()
             .retain(|t| live.contains(&t.comp) || t.comp == FLOW_ID);
         self.errors.retain(|id, _| live.contains(id) || *id == FLOW_ID);
+        self.last_fired.retain(|id, _| live.contains(id) || *id == FLOW_ID);
 
         let mut fresh = Vec::new();
         for comp in circuit.components.values() {
@@ -724,6 +769,10 @@ impl ScriptHost {
             return Vec::new();
         }
         *self.shared.current.borrow_mut() = comp;
+        if name != "on_tick" {
+            let now = self.shared.world.borrow().now_ms;
+            self.last_fired.insert(comp, (name.to_string(), now));
+        }
         let opts = CallFnOptions::new().eval_ast(false).bind_this_ptr(&mut inst.state);
         let mut scope = Scope::new();
         let result = self
@@ -867,6 +916,7 @@ impl ScriptHost {
         for t in due {
             let Some(inst) = self.instances.get(&t.comp) else { continue };
             *self.shared.current.borrow_mut() = t.comp;
+            self.last_fired.insert(t.comp, ("timer".to_string(), now_ms));
             if let Err(e) = t.f.call::<Dynamic>(&self.engine, &inst.ast, ()) {
                 let who = self.names.get(&t.comp).cloned().unwrap_or_else(|| format!("#{}", t.comp.0));
                 self.shared.fx.borrow_mut().logs.push(format!("[{who}] error in timer: {e}"));

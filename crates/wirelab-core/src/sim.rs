@@ -115,6 +115,95 @@ pub fn rgb888(v: u16) -> [u8; 3] {
     [((v >> 11) as u8 & 0x1f) << 3, ((v >> 5) as u8 & 0x3f) << 2, (v as u8 & 0x1f) << 3]
 }
 
+/// Side of the simulated ST7735 panel in pixels.
+pub const LCD_SIDE: u16 = 128;
+/// Glyph cell of the firmware's FONT_6X10.
+pub const LCD_GLYPH: (u16, u16) = (6, 10);
+/// Ops kept per display log; the oldest after the base clear go first.
+const LCD_MAX_OPS: usize = 1024;
+
+impl LcdOp {
+    /// Pixel bounds `[x0, y0, x1, y1)` clipped to the panel.
+    pub fn bounds(&self) -> [u16; 4] {
+        let clip = |v: u16| v.min(LCD_SIDE);
+        match self {
+            LcdOp::Clear(_) => [0, 0, LCD_SIDE, LCD_SIDE],
+            LcdOp::Rect { x, y, w, h, .. } => {
+                let (x, y) = (u16::from(*x), u16::from(*y));
+                [clip(x), clip(y), clip(x + u16::from(*w)), clip(y + u16::from(*h))]
+            }
+            LcdOp::Text { x, y, text, .. } => {
+                let (x, y) = (u16::from(*x), u16::from(*y));
+                let cols = text.chars().count().min(usize::from(LCD_SIDE)) as u16;
+                [clip(x), clip(y), clip(x + cols * LCD_GLYPH.0), clip(y + LCD_GLYPH.1)]
+            }
+        }
+    }
+
+    fn within(&self, outer: [u16; 4]) -> bool {
+        let [x0, y0, x1, y1] = self.bounds();
+        x0 >= outer[0] && y0 >= outer[1] && x1 <= outer[2] && y1 <= outer[3]
+    }
+}
+
+/// Applies one host display message to a simulated op log; returns true when the log changed.
+///
+/// A fill drops the earlier ops it fully covers, so the log stays bounded for scripts that redraw
+/// regions, and a full-panel fill restarts the log from a clear.
+pub fn apply_lcd_msg(lcd: &mut Option<Vec<LcdOp>>, msg: &HostMsg) -> bool {
+    match msg {
+        HostMsg::LcdInit { .. } => {
+            *lcd = Some(vec![LcdOp::Clear([0, 0, 0])]);
+            true
+        }
+        HostMsg::LcdClear { rgb565 } => match lcd {
+            Some(ops) => {
+                *ops = vec![LcdOp::Clear(rgb888(*rgb565))];
+                true
+            }
+            None => false,
+        },
+        HostMsg::LcdRect { x, y, w, h, rgb565 } => match lcd {
+            Some(ops) => {
+                let op = LcdOp::Rect { x: *x, y: *y, w: *w, h: *h, rgb: rgb888(*rgb565) };
+                let area = op.bounds();
+                if area[0] >= area[2] || area[1] >= area[3] {
+                    return false;
+                }
+                if area == [0, 0, LCD_SIDE, LCD_SIDE] {
+                    *ops = vec![LcdOp::Clear(rgb888(*rgb565))];
+                } else {
+                    let mut first = true;
+                    ops.retain(|o| std::mem::take(&mut first) || !o.within(area));
+                    push_capped(ops, op);
+                }
+                true
+            }
+            None => false,
+        },
+        HostMsg::LcdText { x, y, rgb565, text } => match lcd {
+            Some(ops) => {
+                push_capped(
+                    ops,
+                    LcdOp::Text { x: *x, y: *y, rgb: rgb888(*rgb565), text: text.to_string() },
+                );
+                true
+            }
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+fn push_capped(ops: &mut Vec<LcdOp>, op: LcdOp) {
+    ops.push(op);
+    if ops.len() > LCD_MAX_OPS {
+        let keep_base = usize::from(matches!(ops.first(), Some(LcdOp::Clear(_))));
+        let excess = ops.len() - LCD_MAX_OPS;
+        ops.drain(keep_base..keep_base + excess);
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Element {
     a: usize,

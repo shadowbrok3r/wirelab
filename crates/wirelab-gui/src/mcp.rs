@@ -922,15 +922,16 @@ impl WireLabApp {
             }
             Cmd::SetScript { comp, source } => {
                 let id = self.resolve_comp(&comp)?;
-                let mut sorted: Vec<String> = names.values().cloned().collect();
-                sorted.sort();
-                self.linter.set_api(&sorted);
                 let diags: Vec<Value> = self
-                    .linter
-                    .lint(&source)
+                    .docs
+                    .diagnose_source(&source, &self.project.circuit, &self.lib, &self.live.scripts, Some(id))
                     .iter()
-                    .map(|d| json!({"line": d.line, "col": d.col, "message": d.message}))
+                    .map(diag_json)
                     .collect();
+                let editor_in_sync = !self.docs.is_dirty(id, &self.project.circuit);
+                if editor_in_sync {
+                    self.docs.set_buffer(id, &self.project.circuit, source.clone());
+                }
                 if let Some(c) = self.project.circuit.components.get_mut(&id) {
                     c.script = Some(source);
                 }
@@ -1169,16 +1170,14 @@ impl WireLabApp {
                 let names = wirelab_core::script::component_names(circuit, &self.lib);
                 let comp_name =
                     names.get(&id).cloned().unwrap_or_else(|| id.0.to_string());
-                let mut api: Vec<String> = names.into_values().collect();
-                api.sort();
-                self.linter.set_api(&api);
+                let circuit = circuit.clone();
                 let diags: Vec<Value> = if source.trim().is_empty() {
                     Vec::new()
                 } else {
-                    self.linter
-                        .lint(&source)
+                    self.docs
+                        .diagnose_source(&source, &circuit, &self.lib, &self.live.scripts, Some(id))
                         .iter()
-                        .map(|d| json!({"line": d.line, "col": d.col, "message": d.message}))
+                        .map(diag_json)
                         .collect()
                 };
                 let compile_error = if source.trim().is_empty() {
@@ -1272,6 +1271,15 @@ impl WireLabApp {
             }
         }
     }
+}
+
+/// A script diagnostic as MCP JSON.
+fn diag_json(d: &crate::rhai_lint::LintDiag) -> Value {
+    let severity = match d.severity {
+        crate::rhai_lint::Severity::Error => "error",
+        crate::rhai_lint::Severity::Warning => "warning",
+    };
+    json!({"line": d.line, "col": d.col, "severity": severity, "message": d.message})
 }
 
 #[cfg(test)]

@@ -24,6 +24,8 @@ egui-phosphor = { workspace = true }
 egui-theme-kit = { workspace = true }
 egui-icon-pack = { workspace = true }
 egui-snarl = { workspace = true }
+egui_dock = { workspace = true }
+embedded-graphics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rfd = { workspace = true }

@@ -102,3 +102,17 @@ pub fn ide_info(app: &WireLabApp, key: &str) -> String {
         _ => "unknown info sheet".into(),
     }
 }
+
+/// Tab title of an info sheet.
+pub fn title(key: &str) -> &'static str {
+    match key {
+        "board" => "Board",
+        "wifi" => "Wi-Fi",
+        "ble" => "Bluetooth LE",
+        "zigbee" => "802.15.4",
+        "uart" => "UART",
+        "spi" => "SPI",
+        "i2c" => "I2C",
+        _ => "Info",
+    }
+}

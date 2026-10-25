@@ -1,8 +1,9 @@
 //! Live session management: connect, sync, engine loop.
 
+use std::collections::HashSet;
 use std::time::Instant;
 
-use wirelab_core::circuit::Circuit;
+use wirelab_core::circuit::{Circuit, CompId};
 use wirelab_core::engine::{Bindings, Engine, InKind, plan_setup};
 use wirelab_core::library::Library;
 use wirelab_core::netlist::Netlist;
@@ -43,6 +44,8 @@ pub struct LiveState {
     pub synced_topo: u64,
     pub synced_state: u64,
     pub setup_sent: bool,
+    /// Pin plan last sent to the device; an identical plan is not re-sent.
+    last_setup: Vec<wirelab_proto::HostMsg>,
     /// Latest digital telemetry snapshot, bit N = GPIO N.
     pub telemetry_levels: u64,
     /// Last WS2812 color sent over serial, for the board drawing.
@@ -82,6 +85,7 @@ impl Default for LiveState {
             synced_topo: 0,
             synced_state: 0,
             setup_sent: false,
+            last_setup: Vec::new(),
             telemetry_levels: 0,
             last_rgb: None,
             uart_buf: String::new(),
@@ -371,8 +375,18 @@ impl LiveState {
             self.synced_state = state_rev;
         }
 
+        // A changed pin plan resets the device, which drops everything scripts configured.
+        let setup = (session.phase == SessionPhase::Ready
+            && (!self.setup_sent || self.synced_topo != topo_rev))
+            .then(|| plan_setup(circuit, &board, lib, netlist).0);
+        let resetting = setup.as_ref().is_some_and(|m| !self.setup_sent || *m != self.last_setup);
+        if resetting && self.setup_sent {
+            self.scripts.restart_all();
+        }
+
         // Scripts follow circuit edits; on_start fires for fresh compiles.
         let mut script_actions: Vec<Action> = Vec::new();
+        let mut started: HashSet<CompId> = HashSet::new();
         if self.synced_scripts != script_rev || self.scripts_topo != topo_rev {
             self.scripts.set_board(
                 board.chip.name(),
@@ -385,6 +399,7 @@ impl LiveState {
             if session.phase == SessionPhase::Ready {
                 for c in fresh {
                     script_actions.extend(self.scripts.on_start(c));
+                    started.insert(c);
                 }
             }
         }
@@ -395,24 +410,27 @@ impl LiveState {
             self.synced_flow = flow_rev;
             if self.scripts.set_flow_script(flow_code) && session.phase == SessionPhase::Ready {
                 script_actions.extend(self.scripts.on_start(wirelab_core::script::FLOW_ID));
+                started.insert(wirelab_core::script::FLOW_ID);
             }
         }
 
-        // (Re)apply auto pin setup once ready and whenever the wiring changes.
-        if session.phase == SessionPhase::Ready && (!self.setup_sent || self.synced_topo != topo_rev)
-        {
-            let (msgs, _) = plan_setup(circuit, &board, lib, netlist);
-            if let Err(e) = session.send_all(&msgs) {
-                log.push(format!("setup send failed: {e}"));
-            } else {
-                log.push(format!("pin setup applied ({} commands)", msgs.len()));
+        // (Re)apply auto pin setup once ready and whenever the pin plan changes; moves and
+        // relabels keep the plan, so the device (and its display) is left alone.
+        if let Some(msgs) = setup {
+            if resetting {
+                if let Err(e) = session.send_all(&msgs) {
+                    log.push(format!("setup send failed: {e}"));
+                } else {
+                    log.push(format!("pin setup applied ({} commands)", msgs.len()));
+                }
+                for c in self.scripts.scripted() {
+                    if started.insert(c) {
+                        script_actions.extend(self.scripts.on_start(c));
+                    }
+                }
+                self.last_setup = msgs;
             }
             self.engine.set_bindings(bindings.clone());
-            if !self.setup_sent {
-                for c in self.scripts.scripted() {
-                    script_actions.extend(self.scripts.on_start(c));
-                }
-            }
             self.setup_sent = true;
             self.synced_topo = topo_rev;
         }
@@ -548,43 +566,10 @@ impl LiveState {
         out.extend(self.engine.tick(now));
 
         for m in &out {
-            use wirelab_core::sim::{LcdOp, rgb888};
-            match m {
-                wirelab_proto::HostMsg::SetRgb { r, g, b, .. } => {
-                    self.last_rgb = Some([*r, *g, *b]);
-                }
-                wirelab_proto::HostMsg::LcdInit { .. } => {
-                    self.lcd_ops = Some(vec![LcdOp::Clear([0, 0, 0])]);
-                }
-                wirelab_proto::HostMsg::LcdClear { rgb565 } => {
-                    if let Some(ops) = &mut self.lcd_ops {
-                        ops.clear();
-                        ops.push(LcdOp::Clear(rgb888(*rgb565)));
-                    }
-                }
-                wirelab_proto::HostMsg::LcdRect { x, y, w, h, rgb565 } => {
-                    if let Some(ops) = &mut self.lcd_ops {
-                        ops.push(LcdOp::Rect { x: *x, y: *y, w: *w, h: *h, rgb: rgb888(*rgb565) });
-                        if ops.len() > 512 {
-                            ops.drain(..256);
-                        }
-                    }
-                }
-                wirelab_proto::HostMsg::LcdText { x, y, rgb565, text } => {
-                    if let Some(ops) = &mut self.lcd_ops {
-                        ops.push(LcdOp::Text {
-                            x: *x,
-                            y: *y,
-                            rgb: rgb888(*rgb565),
-                            text: text.to_string(),
-                        });
-                        if ops.len() > 512 {
-                            ops.drain(..256);
-                        }
-                    }
-                }
-                _ => {}
+            if let wirelab_proto::HostMsg::SetRgb { r, g, b, .. } = m {
+                self.last_rgb = Some([*r, *g, *b]);
             }
+            wirelab_core::sim::apply_lcd_msg(&mut self.lcd_ops, m);
         }
         if !out.is_empty()
             && let Err(e) = session.send_all(&out) {
@@ -664,6 +649,64 @@ mod tests {
             live.tick(lib, circuit, &netlist, &bindings, 1, 1, 1, 1, None, &mut log);
         }
         (live, netlist, bindings)
+    }
+
+    fn shows_hello(live: &LiveState) -> usize {
+        live.live_output
+            .as_ref()
+            .and_then(|o| o.lcd.as_ref())
+            .map_or(0, |ops| {
+                ops.iter()
+                    .filter(|o| matches!(o, wirelab_core::sim::LcdOp::Text { text, .. } if text == "HELLO"))
+                    .count()
+            })
+    }
+
+    /// A move keeps the pin plan, so the display survives; a rewire resets the device and the
+    /// restarted scripts draw it again, once.
+    #[test]
+    fn display_survives_moves_and_redraws_after_a_rewire() {
+        use wirelab_core::circuit::Endpoint;
+        let lib = test_lib();
+        let mut c = circuit_with_button_script(
+            r#"fn on_start() { lcd_init(7, 2, 25, 26, 3); lcd_text(4, 4, "HELLO", 255, 255, 255); }"#,
+        );
+        let (mut live, netlist, bindings) = live_for(&lib, &c);
+        // The simulator re-solves once per elapsed millisecond.
+        let settle = |live: &mut LiveState, c: &Circuit, nl: &Netlist, b: &Bindings, topo, log: &mut Vec<String>| {
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                live.tick(&lib, c, nl, b, topo, 1, 1, 1, None, log);
+            }
+        };
+        let mut log = Vec::new();
+        settle(&mut live, &c, &netlist, &bindings, 1, &mut log);
+        assert_eq!(shows_hello(&live), 1, "{log:?}");
+
+        let btn = *c.components.keys().next().unwrap();
+        c.components.get_mut(&btn).unwrap().pos = [30.0, 12.0];
+        let mut log = Vec::new();
+        settle(&mut live, &c, &netlist, &bindings, 2, &mut log);
+        assert_eq!(shows_hello(&live), 1, "a move must not blank the display: {log:?}");
+        assert!(!log.iter().any(|l| l.contains("pin setup applied")), "{log:?}");
+
+        c.add_wire(
+            Endpoint::BoardPin { key: "GPIO6".into() },
+            Endpoint::Terminal { comp: btn, terminal: "a".into() },
+            [0; 3],
+        );
+        c.add_wire(
+            Endpoint::Terminal { comp: btn, terminal: "b".into() },
+            Endpoint::BoardPin { key: "GND1".into() },
+            [0; 3],
+        );
+        let board = lib.board(&c.board_id).unwrap().clone();
+        let netlist = Netlist::build(&c, &board, &lib);
+        let (_msgs, bindings) = plan_setup(&c, &board, &lib, &netlist);
+        let mut log = Vec::new();
+        settle(&mut live, &c, &netlist, &bindings, 3, &mut log);
+        assert!(log.iter().any(|l| l.contains("pin setup applied")), "{log:?}");
+        assert_eq!(shows_hello(&live), 1, "restarted script redraws once: {log:?}");
     }
 
     /// The exact mechanics the app's router relies on: a script's send_board

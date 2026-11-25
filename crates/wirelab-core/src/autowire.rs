@@ -308,7 +308,14 @@ pub fn auto_wire(
                 push(&mut plan, sig, Some(gpio_ep));
                 plan.notes.push(format!("{who}: signal on GPIO{g} (ADC)"));
             }
-            SimModel::Resistor { .. } | SimModel::Generic => {}
+            SimModel::Resistor { .. }
+            | SimModel::Generic
+            | SimModel::DcSupply { .. }
+            | SimModel::HvBoost { .. }
+            | SimModel::Capacitor { .. }
+            | SimModel::Diode { .. }
+            | SimModel::ArcContact { .. }
+            | SimModel::Conductor { .. } => {}
         }
     }
 

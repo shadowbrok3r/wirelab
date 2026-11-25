@@ -1,7 +1,8 @@
 //! Interactive circuit canvas: pan/zoom, placement, wiring, live pokes.
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
-use wirelab_core::circuit::{CompId, Endpoint, PlacedComponent, WireId};
+use wirelab_core::breadboard::{self, HoleRef};
+use wirelab_core::circuit::{BbId, CompId, Endpoint, PlacedBreadboard, PlacedComponent, WireId};
 use wirelab_core::component::{CompState, SimModel};
 use wirelab_core::netlist::{WireVerdict, wire_verdict};
 use wirelab_proto::PinMode;
@@ -22,6 +23,8 @@ pub struct CanvasState {
     pub placing: Option<String>,
     pub wire_from: Option<Endpoint>,
     pub dragging: Option<(CompId, Vec2)>,
+    /// Breadboard being dragged, grab offset, and the parts seated in it.
+    pub dragging_bb: Option<(BbId, Vec2, Vec<CompId>)>,
     pub pressed_button: Option<CompId>,
     /// Screen-space anchor of an in-progress rubber-band selection.
     pub select_start: Option<Pos2>,
@@ -42,6 +45,7 @@ impl Default for CanvasState {
             placing: None,
             wire_from: None,
             dragging: None,
+            dragging_bb: None,
             pressed_button: None,
             select_start: None,
             ctx_hit: None,
@@ -59,7 +63,12 @@ enum Hit {
     Comp(CompId),
     Wire(WireId),
     Feature(BoardControl),
+    Hole(BbId, HoleRef),
+    Breadboard(BbId),
 }
+
+/// Leads snap to a hole within this distance while dragging or placing.
+const SNAP_MM: f32 = 1.4;
 
 const WIRE_PALETTE: [[u8; 3]; 6] = [
     [86, 156, 255],
@@ -76,13 +85,16 @@ impl WireLabApp {
             Endpoint::BoardPin { key } => {
                 let board = self.lib.board(&self.project.circuit.board_id)?;
                 let pin = board.pin(key)?;
-                Some(board_pin_world_pos(board, pin, self.project.circuit.board_pos))
+                Some(board_pin_world_pos(board, pin, self.project.circuit.board_pos, self.project.circuit.board_rotation))
             }
             Endpoint::Terminal { comp, terminal } => {
                 let c = self.project.circuit.components.get(comp)?;
                 let def = self.lib.component(&c.def_id)?;
                 let idx = def.terminals.iter().position(|t| &t.id == terminal)?;
                 Some(terminal_world_pos(c, def, idx))
+            }
+            Endpoint::Hole { bb, hole } => {
+                breadboard::hole_endpoint_world(&self.project.circuit, &self.lib, *bb, hole)
             }
         }
     }
@@ -105,7 +117,7 @@ impl WireLabApp {
     /// Pixels a doubling-back wire must travel to clear this endpoint's body.
     fn endpoint_clearance(&self, view: &View, ep: &Endpoint) -> f32 {
         match ep {
-            Endpoint::BoardPin { .. } => 0.0,
+            Endpoint::BoardPin { .. } | Endpoint::Hole { .. } => 0.0,
             Endpoint::Terminal { comp, .. } => self
                 .project
                 .circuit
@@ -125,6 +137,20 @@ impl WireLabApp {
     ) -> Option<Vec<Pos2>> {
         let a = self.endpoint_world(&wire.a)?;
         let b = self.endpoint_world(&wire.b)?;
+        if !wire.waypoints.is_empty() {
+            let at = |p: [f32; 2]| {
+                let s = view.to_screen(p);
+                [s.x, s.y]
+            };
+            let (sa, sb) = (at(a), at(b));
+            let wps: Vec<[f32; 2]> = wire.waypoints.iter().map(|&p| at(p)).collect();
+            return Some(
+                wirelab_core::geometry::waypoint_path(sa, &wps, sb, 9.0)
+                    .into_iter()
+                    .map(|p| Pos2::new(p[0], p[1]))
+                    .collect(),
+            );
+        }
         let ea = self.endpoint_exit_dir(&wire.a);
         let eb = self.endpoint_exit_dir(&wire.b);
         let route = draw::Route {
@@ -155,12 +181,13 @@ impl WireLabApp {
                     board,
                     pin,
                     self.project.circuit.board_pos,
+                    self.project.circuit.board_rotation,
                 ));
                 if p.distance(pointer) < PIN_HIT_RADIUS_PX {
                     return Some(Hit::Pin(pin.key.clone()));
                 }
             }
-            for (kind, world_rect) in board_feature_rects(board, self.project.circuit.board_pos)
+            for (kind, world_rect) in board_feature_rects(board, self.project.circuit.board_pos, self.project.circuit.board_rotation)
             {
                 let r = Rect::from_min_max(
                     view.to_screen([world_rect.min.x, world_rect.min.y]),
@@ -182,17 +209,134 @@ impl WireLabApp {
                 return Some(Hit::Comp(comp.id));
             }
         }
+        let world = view.to_world(pointer);
+        let tol = (PIN_HIT_RADIUS_PX / view.scale).min(breadboard::PITCH_MM * 0.45);
+        if let Some((bb, h)) = breadboard::hole_at(&self.project.circuit, &self.lib, world, tol) {
+            return Some(Hit::Hole(bb, h));
+        }
         for wire in self.project.circuit.wires.values() {
             let Some(pts) = self.wire_screen_path(view, wire) else { continue };
             if draw::wire_hit_distance(&pts, pointer) < 6.0 {
                 return Some(Hit::Wire(wire.id));
             }
         }
-        None
+        self.breadboard_at(world).map(Hit::Breadboard)
+    }
+
+    fn breadboard_at(&self, world: [f32; 2]) -> Option<BbId> {
+        self.project.circuit.breadboards.values().rev().find_map(|bb| {
+            let p = self.lib.breadboard(&bb.profile)?;
+            let l = breadboard::world_to_local(bb, p, world);
+            (l[0] >= 0.0 && l[1] >= 0.0 && l[0] <= p.width_mm && l[1] <= p.height_mm).then_some(bb.id)
+        })
+    }
+
+    fn hole_endpoint(&self, bb: BbId, h: HoleRef) -> Option<Endpoint> {
+        let p = self.lib.breadboard(&self.project.circuit.breadboards.get(&bb)?.profile)?;
+        Some(Endpoint::Hole { bb, hole: p.hole_name(h) })
+    }
+
+    /// Hole a breadboard endpoint or seated lead sits in.
+    fn endpoint_hole(&self, ep: &Endpoint) -> Option<(BbId, HoleRef)> {
+        match ep {
+            Endpoint::Hole { bb, hole } => {
+                let p = self.lib.breadboard(&self.project.circuit.breadboards.get(bb)?.profile)?;
+                Some((*bb, p.parse_hole(hole)?))
+            }
+            other => self.cache.seating.seat_of(other).map(|s| (s.bb, s.hole)),
+        }
+    }
+
+    /// Part position adjusted so its closest lead drops into a nearby hole.
+    fn snap_to_holes(&self, comp: &PlacedComponent, pos: [f32; 2]) -> [f32; 2] {
+        let rounded = [pos[0].round(), pos[1].round()];
+        let Some(def) = self.lib.component(&comp.def_id) else { return rounded };
+        if def.leads.is_empty() || self.project.circuit.breadboards.is_empty() {
+            return rounded;
+        }
+        let mut probe = comp.clone();
+        probe.pos = pos;
+        let mut best: Option<([f32; 2], f32)> = None;
+        for i in 0..def.terminals.len() {
+            let t = terminal_world_pos(&probe, def, i);
+            let Some((bb, h)) = breadboard::hole_at(&self.project.circuit, &self.lib, t, SNAP_MM) else {
+                continue;
+            };
+            let Some(hw) = self.hole_endpoint(bb, h).and_then(|ep| self.endpoint_world(&ep)) else { continue };
+            let d = (hw[0] - t[0]).hypot(hw[1] - t[1]);
+            if best.is_none_or(|(_, bd)| d < bd) {
+                best = Some(([hw[0] - t[0], hw[1] - t[1]], d));
+            }
+        }
+        match best {
+            Some((d, _)) => [pos[0] + d[0], pos[1] + d[1]],
+            None => rounded,
+        }
+    }
+
+    /// Parts whose every lead sits in this breadboard; they ride along with it.
+    pub(crate) fn parts_seated_in(&self, bb: BbId) -> Vec<CompId> {
+        let board = self.lib.board(&self.project.circuit.board_id);
+        let seating = breadboard::seating(&self.project.circuit, board, &self.lib);
+        self.project
+            .circuit
+            .components
+            .values()
+            .filter(|c| {
+                let Some(def) = self.lib.component(&c.def_id) else { return false };
+                !def.leads.is_empty()
+                    && def.terminals.iter().all(|t| {
+                        let ep = Endpoint::Terminal { comp: c.id, terminal: t.id.clone() };
+                        seating.seat_of(&ep).is_some_and(|s| s.bb == bb)
+                    })
+            })
+            .map(|c| c.id)
+            .collect()
+    }
+
+    /// Quarter-turn a breadboard about its centre, carrying its seated parts.
+    pub fn rotate_breadboard(&mut self, id: BbId) {
+        let carried = self.parts_seated_in(id);
+        let Some(bb) = self.project.circuit.breadboards.get_mut(&id) else { return };
+        bb.rotation = (bb.rotation + 90) % 360;
+        let center = bb.pos;
+        for cid in carried {
+            if let Some(c) = self.project.circuit.components.get_mut(&cid) {
+                let r = wirelab_core::geometry::rotate([c.pos[0] - center[0], c.pos[1] - center[1]], 90);
+                c.pos = [center[0] + r[0], center[1] + r[1]];
+                c.rotation = (c.rotation + 90) % 360;
+            }
+        }
+        self.topo_rev += 1;
+    }
+
+    /// Add a breadboard from the library, centred at a world position.
+    pub fn add_breadboard_at(&mut self, profile: &str, world: [f32; 2]) -> Option<BbId> {
+        if self.lib.breadboard(profile).is_none() {
+            self.console.push(format!("unknown breadboard '{profile}'"));
+            return None;
+        }
+        let id = self.project.circuit.add_breadboard(PlacedBreadboard {
+            id: BbId(0),
+            profile: profile.to_string(),
+            pos: [world[0].round(), world[1].round()],
+            rotation: 0,
+            label: String::new(),
+        });
+        self.topo_rev += 1;
+        Some(id)
     }
 
     fn wire_color_for(&self, a: &Endpoint, b: &Endpoint) -> [u8; 3] {
         let rail = |ep: &Endpoint| -> Option<[u8; 3]> {
+            if let Endpoint::Hole { bb, hole } = ep {
+                let p = self.lib.breadboard(&self.project.circuit.breadboards.get(bb)?.profile)?;
+                return match p.lines.get(p.parse_hole(hole)?.line)?.polarity.as_str() {
+                    "+" => Some([220, 60, 50]),
+                    "-" => Some([40, 40, 40]),
+                    _ => None,
+                };
+            }
             let Endpoint::BoardPin { key } = ep else { return None };
             let board = self.lib.board(&self.project.circuit.board_id)?;
             match board.pin(key)?.kind {
@@ -302,6 +446,7 @@ impl WireLabApp {
         match hit {
             Hit::Pin(k) => Some(Endpoint::BoardPin { key: k.clone() }),
             Hit::Terminal(c, i) => self.terminal_endpoint(*c, *i),
+            Hit::Hole(bb, h) => self.hole_endpoint(*bb, *h),
             _ => None,
         }
     }
@@ -379,6 +524,32 @@ impl WireLabApp {
             }
         }
 
+        // Breadboards, under everything else; the copper under the cursor lights up.
+        let hover_hole = match &hover {
+            Some(Hit::Hole(bb, h)) => Some((*bb, *h)),
+            Some(Hit::Terminal(c, i)) => {
+                self.terminal_endpoint(*c, *i).and_then(|ep| self.endpoint_hole(&ep))
+            }
+            _ => None,
+        }
+        .or_else(|| self.canvas.wire_from.as_ref().and_then(|ep| self.endpoint_hole(ep)));
+        let bus_color = ui.visuals().warn_fg_color;
+        for bb in self.project.circuit.breadboards.values() {
+            let Some(p) = self.lib.breadboard(&bb.profile) else { continue };
+            let (bus, hovered) = match hover_hole {
+                Some((id, h)) if id == bb.id => (p.bus_holes(h), Some(h)),
+                _ => (Vec::new(), None),
+            };
+            let paint = crate::breadboard_view::BbPaint {
+                bus: &bus,
+                bus_color,
+                hovered,
+                selected: self.selection == Selection::Breadboard(bb.id),
+                accent,
+            };
+            crate::breadboard_view::draw(&painter, &view, bb, p, &paint);
+        }
+
         // Board.
         let live_bank = self.live.effective_bank();
         let live_out = self.live.live_output.clone();
@@ -427,6 +598,7 @@ impl WireLabApp {
                     &view,
                     &board,
                     self.project.circuit.board_pos,
+                    self.project.circuit.board_rotation,
                     hovered_pin,
                     Some(f),
                     &group_keys,
@@ -439,6 +611,7 @@ impl WireLabApp {
                     &view,
                     &board,
                     self.project.circuit.board_pos,
+                    self.project.circuit.board_rotation,
                     hovered_pin,
                     None,
                     &group_keys,
@@ -447,6 +620,30 @@ impl WireLabApp {
                     live_out.as_ref().and_then(|o| o.rgb),
                 ),
             }
+        }
+
+        // On-board display glass, showing the simulated panel when no display part claims it.
+        if let Some([dx, dy, dw, dh]) =
+            self.lib.board(&self.project.circuit.board_id).and_then(|b| b.features.display)
+        {
+            let (bp, rot) = (self.project.circuit.board_pos, self.project.circuit.board_rotation);
+            let board = self.lib.board(&self.project.circuit.board_id).expect("board with a display");
+            let corner = |p: [f32; 2]| view.to_screen(wirelab_core::geometry::board_local_to_world(board, bp, rot, p));
+            let glass = egui::Rect::from_two_pos(corner([dx, dy]), corner([dx + dw, dy + dh]));
+            painter.rect_filled(glass.expand(view.px(0.6)), CornerRadius::same(3), Color32::from_gray(22));
+            painter.rect_filled(glass, CornerRadius::same(1), Color32::from_rgb(4, 5, 8));
+            let claimed = self.project.circuit.components.values().any(|c| c.def_id.starts_with("st7735"));
+            if !claimed
+                && let Some(ops) = live_out.as_ref().and_then(|o| o.lcd.as_ref())
+            {
+                let side = glass.width().min(glass.height());
+                let square = egui::Rect::from_center_size(glass.center(), egui::Vec2::splat(side));
+                let texture = self.lcd_texture.texture(ui.ctx(), ops);
+                crate::lcd::paint(&painter, square, rot, texture);
+            }
+        }
+        if let Some(board) = self.lib.board(&self.project.circuit.board_id) {
+            draw::draw_board_pin_labels(&painter, &view, board, self.project.circuit.board_pos, self.project.circuit.board_rotation);
         }
 
         // Wires.
@@ -497,6 +694,17 @@ impl WireLabApp {
             self.paint_script_badge(ui, &view, &comp, &def, time);
         }
 
+        // Inserted leads get a solder fillet; leads that miss a hole are crossed out.
+        for seat in &self.cache.seating.seats {
+            if let Some(w) = self.endpoint_world(&seat.ep) {
+                crate::breadboard_view::draw_seat(&painter, &view, w);
+            }
+        }
+        let miss_color = ui.visuals().error_fg_color;
+        for miss in &self.cache.seating.misses {
+            crate::breadboard_view::draw_miss(&painter, &view, miss.world, miss_color);
+        }
+
         // Spotlight the components a hovered warning refers to.
         if !self.hover_highlight.is_empty() {
             let hl = ui.visuals().warn_fg_color;
@@ -543,6 +751,7 @@ impl WireLabApp {
                         &board,
                         pin,
                         self.project.circuit.board_pos,
+                        self.project.circuit.board_rotation,
                     ));
                     mark(pos, view.px(1.1).clamp(2.5, 7.0), &self.draft_verdict(&from, &ep));
                 }
@@ -584,7 +793,7 @@ impl WireLabApp {
         if let (Some(def_id), Some(p)) = (self.canvas.placing.clone(), pointer)
             && let Some(def) = self.lib.component(&def_id).cloned() {
                 let world = view.to_world(p);
-                let ghost = PlacedComponent {
+                let mut ghost = PlacedComponent {
                     id: CompId(0),
                     def_id,
                     pos: [world[0].round(), world[1].round()],
@@ -594,6 +803,7 @@ impl WireLabApp {
                     state: CompState::initial(&def.sim),
                     script: None,
                 };
+                ghost.pos = self.snap_to_holes(&ghost, world);
                 // Preview series insertion when hovering a wire (Ctrl skips).
                 let ctrl = ui.input(|i| i.modifiers.ctrl);
                 if !ctrl
@@ -673,6 +883,9 @@ impl WireLabApp {
                 response.clone().on_hover_text(text);
             }
 
+        if let Some(Hit::Hole(bb, h)) = &hover {
+            response.clone().on_hover_text(self.hole_tooltip(*bb, *h));
+        }
         if let Some(Hit::Comp(id)) = &hover
             && self.canvas.dragging.is_none()
         {
@@ -704,7 +917,7 @@ impl WireLabApp {
                     .components
                     .get(id)
                     .and_then(|c| self.lib.component(&c.def_id))
-                    .is_some_and(|d| matches!(d.sim, SimModel::PushButton));
+                    .is_some_and(|d| matches!(d.sim, SimModel::PushButton | SimModel::ArcContact { .. }));
                 if is_button
                     && let Some(c) = self.project.circuit.components.get_mut(id) {
                         c.state = CompState::Button { pressed: true };
@@ -737,7 +950,7 @@ impl WireLabApp {
                     } else {
                         self.splice_target(&view, p, &def, world)
                     };
-                    let id = self.project.circuit.add_component(PlacedComponent {
+                    let mut placed = PlacedComponent {
                         id: CompId(0),
                         def_id,
                         pos: [world[0].round(), world[1].round()],
@@ -746,7 +959,9 @@ impl WireLabApp {
                         props: Default::default(),
                         state: CompState::initial(&def.sim),
                         script: None,
-                    });
+                    };
+                    placed.pos = self.snap_to_holes(&placed, world);
+                    let id = self.project.circuit.add_component(placed);
                     if let Some((wid, ta, tb)) = splice
                         && self.project.circuit.splice_component(wid, id, &ta, &tb) {
                             self.console.push(format!("{} spliced into the wire", def.name));
@@ -805,6 +1020,10 @@ impl WireLabApp {
                         self.live_interact_click(*id);
                     }
                     Some(Hit::Wire(id)) => self.selection = Selection::Wire(*id),
+                    Some(Hit::Hole(bb, h)) => {
+                        self.canvas.wire_from = self.hole_endpoint(*bb, *h);
+                    }
+                    Some(Hit::Breadboard(id)) => self.selection = Selection::Breadboard(*id),
                     None => self.selection = Selection::None,
                 }
             }
@@ -822,6 +1041,15 @@ impl WireLabApp {
                 // A dot's centre terminal covers its whole body; dragging it
                 // moves the dot (clicking still starts a wire).
                 Some(Hit::Terminal(id, _)) if self.comp_is_dot(id) => Some(id),
+                Some(Hit::Breadboard(bb)) | Some(Hit::Hole(bb, _)) => {
+                    if let Some(b) = self.project.circuit.breadboards.get(&bb) {
+                        let start = view.to_screen(b.pos);
+                        let grab = start_pos.unwrap_or(start) - start;
+                        self.canvas.dragging_bb = Some((bb, grab, self.parts_seated_in(bb)));
+                        self.selection = Selection::Breadboard(bb);
+                    }
+                    None
+                }
                 None => {
                     self.canvas.select_start = start_pos;
                     None
@@ -842,7 +1070,10 @@ impl WireLabApp {
             if response.dragged_by(egui::PointerButton::Primary)
                 && let Some(p) = pointer {
                     let world = view.to_world(p - grab);
-                    let target = [world[0].round(), world[1].round()];
+                    let target = match self.project.circuit.components.get(&id) {
+                        Some(c) => self.snap_to_holes(c, world),
+                        None => [world[0].round(), world[1].round()],
+                    };
                     let group = self.selection.comp_ids();
                     let old = self.project.circuit.components.get(&id).map(|c| c.pos);
                     if let Some(old) = old {
@@ -860,6 +1091,27 @@ impl WireLabApp {
                 }
             if response.drag_stopped() {
                 self.canvas.dragging = None;
+                self.topo_rev += 1;
+            }
+        }
+        if let Some((bb, grab, carried)) = self.canvas.dragging_bb.clone() {
+            if response.dragged_by(egui::PointerButton::Primary)
+                && let Some(p) = pointer
+            {
+                let world = view.to_world(p - grab);
+                let target = [(world[0] * 10.0).round() / 10.0, (world[1] * 10.0).round() / 10.0];
+                if let Some(b) = self.project.circuit.breadboards.get_mut(&bb) {
+                    let delta = [target[0] - b.pos[0], target[1] - b.pos[1]];
+                    b.pos = target;
+                    for cid in &carried {
+                        if let Some(c) = self.project.circuit.components.get_mut(cid) {
+                            c.pos = [c.pos[0] + delta[0], c.pos[1] + delta[1]];
+                        }
+                    }
+                }
+            }
+            if response.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+                self.canvas.dragging_bb = None;
                 self.topo_rev += 1;
             }
         }
@@ -916,6 +1168,9 @@ impl WireLabApp {
                 if !ids.is_empty() {
                     self.topo_rev += 1;
                 }
+                if let Selection::Breadboard(id) = self.selection {
+                    self.rotate_breadboard(id);
+                }
             }
             if ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
             {
@@ -928,6 +1183,10 @@ impl WireLabApp {
                     self.topo_rev += 1;
                 } else if let Selection::Wire(id) = self.selection {
                     self.project.circuit.remove_wire(id);
+                    self.selection = Selection::None;
+                    self.topo_rev += 1;
+                } else if let Selection::Breadboard(id) = self.selection {
+                    self.project.circuit.remove_breadboard(id);
                     self.selection = Selection::None;
                     self.topo_rev += 1;
                 }
@@ -982,6 +1241,68 @@ impl WireLabApp {
         );
     }
 
+    /// Hole name, its copper, the net it joins and what sits on that copper.
+    fn hole_tooltip(&self, bb: BbId, h: HoleRef) -> String {
+        let Some(p) = self.project.circuit.breadboards.get(&bb).and_then(|b| self.lib.breadboard(&b.profile))
+        else {
+            return String::new();
+        };
+        let mut text = format!("{} · {}", p.hole_name(h), p.node_label(h));
+        let node = p.node_of(h);
+        let mut on_copper: Vec<String> = self
+            .cache
+            .seating
+            .seats
+            .iter()
+            .filter(|s| s.bb == bb && p.node_of(s.hole) == node)
+            .map(|s| format!("{} in {}", self.endpoint_label(&s.ep), s.hole_name))
+            .collect();
+        for w in self.project.circuit.wires.values() {
+            for (here, there) in [(&w.a, &w.b), (&w.b, &w.a)] {
+                if let Endpoint::Hole { bb: b, hole } = here
+                    && *b == bb
+                    && p.parse_hole(hole).is_some_and(|o| p.node_of(o) == node)
+                {
+                    on_copper.push(format!("wire {hole} -> {}", self.endpoint_label(there)));
+                }
+            }
+        }
+        if let Some(net) = self.hole_endpoint(bb, h).and_then(|ep| self.cache.netlist.net_of(&ep)) {
+            let name = self
+                .project
+                .circuit
+                .net_names
+                .iter()
+                .find(|(_, ep)| self.cache.netlist.net_of(ep) == Some(net))
+                .map(|(n, _)| n.clone());
+            if let Some(name) = name {
+                text += &format!("\nnet {name}");
+            }
+        }
+        for line in on_copper {
+            text += &format!("\n  {line}");
+        }
+        if self.canvas.wire_from.is_none() {
+            text += "\nclick to start a wire from this hole";
+        }
+        text
+    }
+
+    /// Short readable name for an endpoint, e.g. "R1.a", "GPIO4", "E12".
+    pub fn endpoint_label(&self, ep: &Endpoint) -> String {
+        match ep {
+            Endpoint::BoardPin { key } => key.clone(),
+            Endpoint::Terminal { comp, terminal } => format!("{}.{terminal}", self.comp_name(*comp)),
+            Endpoint::Hole { bb, hole } => {
+                if self.project.circuit.breadboards.len() > 1 {
+                    format!("BB{}:{hole}", bb.0)
+                } else {
+                    hole.clone()
+                }
+            }
+        }
+    }
+
     fn terminal_endpoint(&self, comp: CompId, index: usize) -> Option<Endpoint> {
         let c = self.project.circuit.components.get(&comp)?;
         let def = self.lib.component(&c.def_id)?;
@@ -1012,6 +1333,24 @@ impl WireLabApp {
                 }
                 if controls::menu_danger_item(ui, ui_kit::kit(ph::TRASH), "Delete").clicked() {
                     self.project.circuit.remove_component(id);
+                    self.selection = Selection::None;
+                    self.topo_rev += 1;
+                    ui.close();
+                }
+                controls::menu_separator(ui);
+            }
+
+            let bb_hit = match self.canvas.ctx_hit {
+                Some(Hit::Breadboard(id)) | Some(Hit::Hole(id, _)) => Some(id),
+                _ => None,
+            };
+            if let Some(id) = bb_hit {
+                if ui_kit::menu_item(ui, ph::ARROW_CLOCKWISE, "Rotate breadboard").clicked() {
+                    self.rotate_breadboard(id);
+                    ui.close();
+                }
+                if controls::menu_danger_item(ui, ui_kit::kit(ph::TRASH), "Delete breadboard").clicked() {
+                    self.project.circuit.remove_breadboard(id);
                     self.selection = Selection::None;
                     self.topo_rev += 1;
                     ui.close();
@@ -1058,6 +1397,30 @@ impl WireLabApp {
             if controls::menu_item(ui, ui_kit::kit(crate::icons::PART_JUNCTION), "Add routing dot").clicked() {
                 self.place_at("junction-dot", world);
                 ui.close();
+            }
+            let profiles: Vec<(String, String)> =
+                self.lib.breadboards.values().map(|p| (p.id.clone(), p.name.clone())).collect();
+            if !profiles.is_empty() {
+                let mut add: Option<String> = None;
+                if ui_kit::menu_item(ui, ph::ARROW_CLOCKWISE, "Rotate dev board").clicked() {
+                    let c = &mut self.project.circuit;
+                    c.board_rotation = (c.board_rotation + 90) % 360;
+                    self.topo_rev += 1;
+                    ui.close();
+                }
+                let _ = controls::submenu(ui, ui_kit::kit(ph::GRID_FOUR), "Add breadboard", |ui| {
+                    for (id, name) in &profiles {
+                        if controls::menu_item(ui, ui_kit::kit(ph::GRID_FOUR), name).clicked() {
+                            add = Some(id.clone());
+                            ui.close();
+                        }
+                    }
+                });
+                if let Some(id) = add
+                    && let Some(bb) = self.add_breadboard_at(&id, world)
+                {
+                    self.selection = Selection::Breadboard(bb);
+                }
             }
         });
     }
@@ -1279,8 +1642,13 @@ impl WireLabApp {
         }
         let mut bounds = Rect::NOTHING;
         if let Some(board) = self.lib.board(&self.project.circuit.board_id) {
-            let p = self.project.circuit.board_pos;
-            bounds = bounds.union(Rect::from_min_size(Pos2::new(p[0], p[1]), Vec2::new(board.width_mm, board.height_mm)));
+            let [a, b] = wirelab_core::geometry::board_world_bounds(board, self.project.circuit.board_pos, self.project.circuit.board_rotation);
+            bounds = bounds.union(Rect::from_min_max(Pos2::new(a[0], a[1]), Pos2::new(b[0], b[1])));
+        }
+        for bb in self.project.circuit.breadboards.values() {
+            let Some(p) = self.lib.breadboard(&bb.profile) else { continue };
+            let size = if bb.rotation % 180 == 90 { Vec2::new(p.height_mm, p.width_mm) } else { Vec2::new(p.width_mm, p.height_mm) };
+            bounds = bounds.union(Rect::from_center_size(Pos2::new(bb.pos[0], bb.pos[1]), size));
         }
         for c in self.project.circuit.components.values() {
             let Some(def) = self.lib.component(&c.def_id) else { continue };

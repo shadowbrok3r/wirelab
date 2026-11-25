@@ -13,6 +13,7 @@ path = "src/main.rs"
 egui-icon-pack-build = { workspace = true }
 
 [dependencies]
+include_dir = "0.7.4"
 wirelab-proto = { workspace = true }
 wirelab-core = { workspace = true }
 wirelab-link = { workspace = true }

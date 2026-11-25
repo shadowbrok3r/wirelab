@@ -1,0 +1,52 @@
+{
+  "id": "dc-supply-12v",
+  "name": "12 V DC Supply (3 A)",
+  "category": "Power",
+  "description": "Floating 12 V DC brick, at least 3 A. Its negative output is NOT tied to earth: check with a meter that - has no continuity to the plug's earth pin before using it on a non-isolated high-voltage build.",
+  "value": "12 V, >=3 A",
+  "rating": "isolated / floating output",
+  "terminals": [
+    {
+      "id": "pos",
+      "name": "+12V",
+      "role": "positive"
+    },
+    {
+      "id": "neg",
+      "name": "-",
+      "role": "negative"
+    }
+  ],
+  "visual": {
+    "shape": "generic",
+    "color": [
+      34,
+      34,
+      38
+    ],
+    "width_mm": 40.0,
+    "height_mm": 22.0
+  },
+  "sim": {
+    "kind": "dc_supply",
+    "volts": 12.0,
+    "r_int_ohms": 0.05,
+    "i_max_a": 3.0
+  },
+  "props": [
+    {
+      "key": "volts",
+      "name": "Output volts",
+      "min": 5.0,
+      "max": 24.0,
+      "default": 12.0
+    },
+    {
+      "key": "i_max_a",
+      "name": "Current rating (A)",
+      "min": 0.5,
+      "max": 20.0,
+      "default": 3.0
+    }
+  ]
+}

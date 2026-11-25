@@ -23,6 +23,7 @@ impl WireLabApp {
     pub fn show_parts(&mut self, ui: &mut egui::Ui) {
         ScrollArea::vertical().id_salt("parts").auto_shrink([false, false]).show(ui, |ui| {
             self.parts_board(ui);
+            self.parts_breadboards(ui);
             let m = egui_theme_kit::metrics(ui.ctx());
             ui.add_space(m.gap.y);
             ui.horizontal(|ui| {
@@ -142,6 +143,7 @@ impl WireLabApp {
             Selection::Comp(id) => self.inspect_component(ui, id),
             Selection::Comps(ids) => self.inspect_many(ui, &ids),
             Selection::Wire(id) => self.inspect_wire(ui, id),
+            Selection::Breadboard(id) => self.inspect_breadboard(ui, id),
             Selection::Pin(key) => self.inspect_pin(ui, &key),
             Selection::None => {
                 controls::empty_state(ui, ui_kit::kit(ph::CURSOR_CLICK), "Nothing selected", "Click a part, a wire or a board pin on the schematic.", &[]);
@@ -173,14 +175,23 @@ impl WireLabApp {
     fn inspect_wire(&mut self, ui: &mut egui::Ui, id: wirelab_core::circuit::WireId) {
         controls::heading(ui, Some(ui_kit::kit(ph::LINK)), &format!("Wire #{}", id.0));
         if let Some(w) = self.project.circuit.wires.get(&id) {
-            let describe = |ep: &wirelab_core::circuit::Endpoint| match ep {
-                wirelab_core::circuit::Endpoint::BoardPin { key } => key.clone(),
-                wirelab_core::circuit::Endpoint::Terminal { comp, terminal } => format!("{}.{terminal}", self.comp_name(*comp)),
-            };
+            let describe = |ep: &wirelab_core::circuit::Endpoint| self.endpoint_label(ep);
             let text = format!("{}  ->  {}", describe(&w.a), describe(&w.b));
             ui_kit::status(ui, ph::ARROWS_LEFT_RIGHT, &text, ui.visuals().text_color());
+            if !w.label.is_empty() || !w.spec.is_empty() {
+                ui.label(RichText::new(format!("{} {}", w.label, w.spec).trim().to_string()).small().weak());
+            }
         }
         ui.add_space(egui_theme_kit::metrics(ui.ctx()).gap.y);
+        let routed = self.project.circuit.wires.get(&id).map_or(0, |w| w.waypoints.len());
+        if routed > 0 {
+            ui.label(RichText::new(format!("Manual route through {routed} points")).small().weak());
+            if ui_kit::button(ui, ph::ERASER, "Clear manual route").clicked()
+                && let Some(w) = self.project.circuit.wires.get_mut(&id)
+            {
+                w.waypoints.clear();
+            }
+        }
         if ui_kit::danger(ui, ph::TRASH, "Delete wire").clicked() {
             self.project.circuit.remove_wire(id);
             self.selection = Selection::None;
@@ -231,6 +242,20 @@ impl WireLabApp {
 
         if let Some(comp) = self.project.circuit.components.get_mut(&id) {
             controls::TextField::new(&mut comp.label).hint("Label (becomes the script name)").icon(ui_kit::kit(ph::TAG)).width(ui.available_width()).show(ui);
+        }
+        if !def.leads.is_empty() {
+            self.inspect_lead_span(ui, id, &def.leads);
+            let seats: Vec<String> = def
+                .terminals
+                .iter()
+                .filter_map(|t| {
+                    let ep = wirelab_core::circuit::Endpoint::Terminal { comp: id, terminal: t.id.clone() };
+                    self.cache.seating.seat_of(&ep).map(|s| format!("{} -> {}", t.id, s.hole_name))
+                })
+                .collect();
+            if !seats.is_empty() {
+                ui_kit::status(ui, ph::PUSH_PIN, &seats.join(" · "), ui.visuals().text_color());
+            }
         }
 
         if Section::new(("inspect-script", id), "Script").icon(ui_kit::kit(ph::FILE_CODE)).default_open(true).header(ui) {

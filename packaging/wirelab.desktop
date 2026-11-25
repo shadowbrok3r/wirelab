@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WireLab
+GenericName=ESP32 circuit builder
+Comment=Build, simulate and flash ESP32 circuits on breadboards
+Exec=wirelab
+Icon=wirelab
+Terminal=false
+Categories=Development;Electronics;
+StartupWMClass=wirelab

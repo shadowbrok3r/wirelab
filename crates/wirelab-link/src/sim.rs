@@ -8,7 +8,7 @@ use wirelab_core::board::BoardProfile;
 use wirelab_core::circuit::Circuit;
 use wirelab_core::library::Library;
 use wirelab_core::netlist::Netlist;
-use wirelab_core::sim::{PinBank, SimOutput, solve};
+use wirelab_core::sim::{PinBank, PowerState, SimOutput, step};
 use wirelab_proto::{
     AnalogSample, Behavior, ChipKind, DeviceMsg, ErrorCode, EventEdge, FW_VERSION, HostMsg,
     MAX_ANALOG_SAMPLES, PROTO_VERSION, PinMode,
@@ -80,6 +80,8 @@ pub struct SimDevice {
     forced_low: HashMap<u8, u64>,
     /// Simulated Wi-Fi station state.
     wifi: (wirelab_proto::WifiState, [u8; 4]),
+    /// Capacitor charge and pulse history; survives chip resets like the real bank.
+    pub power: PowerState,
 }
 
 impl SimDevice {
@@ -104,6 +106,7 @@ impl SimDevice {
             lcd: None,
             forced_low: HashMap::new(),
             wifi: (wirelab_proto::WifiState::Off, [0; 4]),
+            power: PowerState::default(),
         }
     }
 
@@ -133,9 +136,18 @@ impl SimDevice {
     }
 
     pub fn tick(&mut self, now_ms: u64) {
+        let dt_s = now_ms.saturating_sub(self.last_tick_ms) as f64 / 1000.0;
         self.last_tick_ms = now_ms;
         self.run_behaviors(now_ms);
-        let mut out = solve(&self.circuit, &self.board, &self.lib, &self.netlist, &self.bank);
+        let mut out = step(
+            &self.circuit,
+            &self.board,
+            &self.lib,
+            &self.netlist,
+            &self.bank,
+            &mut self.power,
+            dt_s,
+        );
         out.rgb = self.rgb;
         out.lcd = self.lcd.clone();
         self.forced_low.retain(|_, until| now_ms < *until);
@@ -162,8 +174,15 @@ impl SimDevice {
             }
         }
 
-        if self.telemetry_ms > 0 && now_ms >= self.next_telemetry_ms {
-            self.next_telemetry_ms = now_ms + u64::from(self.telemetry_ms);
+        // Watched analog pins may ask for a faster cadence than the telemetry default.
+        let analog_ms = self.watched_analog.values().copied().filter(|&ms| ms > 0).min();
+        let interval = match (self.telemetry_ms, analog_ms) {
+            (0, _) => 0,
+            (t, Some(a)) => t.min(a),
+            (t, None) => t,
+        };
+        if interval > 0 && now_ms >= self.next_telemetry_ms {
+            self.next_telemetry_ms = now_ms + u64::from(interval);
             let mut levels = 0u64;
             for pin in &self.board.pins {
                 let Some(gpio) = pin.kind.gpio() else { continue };
@@ -271,7 +290,15 @@ impl SimDevice {
                 self.bank.apply(msg);
             }
             HostMsg::ReadAnalog { pin } => {
-                let out = solve(&self.circuit, &self.board, &self.lib, &self.netlist, &self.bank);
+                let out = step(
+                    &self.circuit,
+                    &self.board,
+                    &self.lib,
+                    &self.netlist,
+                    &self.bank,
+                    &mut self.power,
+                    0.0,
+                );
                 let mv = out.analog_mv.get(pin).copied().unwrap_or(0);
                 self.outbox.push(DeviceMsg::AnalogValue { pin: *pin, millivolts: mv });
             }

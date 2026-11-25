@@ -1,0 +1,294 @@
+{
+ "id": "electrocookie-mini",
+ "name": "ElectroCookie mini solderable breadboard",
+ "vendor": "ElectroCookie",
+ "width_mm": 38.1,
+ "height_mm": 50.8,
+ "corner_radius_mm": 3.0,
+ "pitch_mm": 2.54,
+ "colors": {
+  "mask": [
+   22,
+   22,
+   24
+  ],
+  "pad": [
+   208,
+   172,
+   84
+  ],
+  "silk": [
+   236,
+   236,
+   232
+  ]
+ },
+ "lines": [
+  {
+   "name": "A",
+   "start": [
+    5.08,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "B",
+   "start": [
+    7.62,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "C",
+   "start": [
+    10.16,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "D",
+   "start": [
+    12.7,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "E",
+   "start": [
+    15.24,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "F",
+   "start": [
+    22.86,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "G",
+   "start": [
+    25.4,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "H",
+   "start": [
+    27.94,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "I",
+   "start": [
+    30.48,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "J",
+   "start": [
+    33.02,
+    5.08
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 17,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  }
+ ],
+ "mounts": [
+  {
+   "at": [
+    19.05,
+    5.08
+   ],
+   "dia_mm": 3.2,
+   "plated": true,
+   "label": "M3"
+  },
+  {
+   "at": [
+    19.05,
+    45.72
+   ],
+   "dia_mm": 3.2,
+   "plated": true,
+   "label": "M3"
+  },
+  {
+   "at": [
+    3.15,
+    3.15
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  },
+  {
+   "at": [
+    34.95,
+    3.15
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  },
+  {
+   "at": [
+    3.15,
+    47.65
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  },
+  {
+   "at": [
+    34.95,
+    47.65
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  }
+ ],
+ "silk": {
+  "numbers": [
+   {
+    "line": "A",
+    "offset": [
+     -2.5,
+     0
+    ]
+   },
+   {
+    "line": "J",
+    "offset": [
+     2.5,
+     0
+    ]
+   }
+  ],
+  "names": [
+   {
+    "index": 1,
+    "offset": [
+     0,
+     -2.6
+    ]
+   },
+   {
+    "index": 17,
+    "offset": [
+     0,
+     2.6
+    ]
+   }
+  ],
+  "texts": [
+   {
+    "text": "ElectroCookie",
+    "at": [
+     19.05,
+     25.4
+    ],
+    "size_mm": 2.2,
+    "vertical": true
+   }
+  ],
+  "border_inset_mm": 0.0
+ },
+ "notes": [
+  "Geometry from the vendor's dimension drawing: 1.5 x 2.0 in board, 0.1 in pitch, M3 centre holes 1.6 in apart, M2 corner holes 1.25 x 1.75 in.",
+  "A-E and F-J are bussed per numbered row (copper strips visible on the bottom view). No power rails."
+ ]
+}

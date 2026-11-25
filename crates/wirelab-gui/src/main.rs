@@ -2,6 +2,7 @@
 
 mod ai_import;
 mod app;
+mod breadboard_view;
 mod canvas;
 mod console;
 mod dock;
@@ -17,6 +18,7 @@ mod lcd;
 mod live;
 mod mcp;
 mod panels;
+mod panels_breadboard;
 mod panels_info;
 mod rhai_docs;
 mod rhai_lint;

@@ -735,4 +735,74 @@ mod tests {
             "receiver handler ran: {log:?}"
         );
     }
+
+    /// Example 21 end to end on the simulator: the firmware charges the 190 uF bank through the
+    /// relay and charger, opens the relay near its set point, sees a weld collapse the bank,
+    /// holds off, recharges, and latches the 310 V cutoff.
+    #[test]
+    fn cd_welder_charges_holds_and_cuts_off() {
+        use wirelab_core::component::VisualState;
+        let lib = test_lib();
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let project = wirelab_core::project::Project::load(
+            &assets.join("examples/21-cd-pulse-arc-welder.wirelab.json"),
+        )
+        .expect("example loads");
+        let mut c = project.circuit.clone();
+        let (mut live, netlist, bindings) = live_for(&lib, &c);
+        let id = |c: &Circuit, label: &str| *c.components.values().find(|x| x.label == label).map(|x| &x.id).unwrap();
+        let (c1, k1, pen) = (id(&c, "C1"), id(&c, "K1"), id(&c, "PEN"));
+        let mut state_rev = 1;
+        let mut log = Vec::new();
+        let run = |live: &mut LiveState, c: &Circuit, state_rev: u64, ms: u64, log: &mut Vec<String>| {
+            let t0 = std::time::Instant::now();
+            while t0.elapsed().as_millis() < u128::from(ms) {
+                std::thread::sleep(std::time::Duration::from_millis(4));
+                live.tick(&lib, c, &netlist, &bindings, 1, state_rev, 1, 1, None, log);
+            }
+        };
+        let vis = |live: &LiveState, comp| live.live_output.as_ref().and_then(|o| o.visuals.get(&comp).copied());
+        let bank = |live: &LiveState| match vis(live, c1) {
+            Some(VisualState::Capacitor { volts, .. }) => volts,
+            other => panic!("no capacitor reading: {other:?}"),
+        };
+
+        run(&mut live, &c, state_rev, 2600, &mut log);
+        assert!(log.iter().any(|l| l.contains("SAFE -> CHARGE")), "{log:?}");
+        assert!(log.iter().any(|l| l.contains("CHARGE -> READY")), "{log:?}");
+        let v = bank(&live);
+        assert!((228.0..=252.0).contains(&v), "bank settles near the 240 V set point, got {v}");
+        assert_eq!(vis(&live, k1), Some(VisualState::RelayClosed(false)), "K1 open while READY");
+
+        // Touch the work: the bank dumps through the pen and the firmware holds K1 open.
+        c.components.get_mut(&pen).unwrap().state = CompState::Button { pressed: true };
+        state_rev += 1;
+        run(&mut live, &c, state_rev, 200, &mut log);
+        assert!(log.iter().any(|l| l.contains("weld #1")), "{log:?}");
+        assert!(bank(&live) < 30.0, "bank collapsed, got {}", bank(&live));
+        match vis(&live, pen) {
+            Some(VisualState::Arc { pulse: Some(p), .. }) => {
+                assert!(p.peak_a > 300.0 && p.dcen, "pulse {p:?}");
+            }
+            other => panic!("no pulse recorded: {other:?}"),
+        }
+        c.components.get_mut(&pen).unwrap().state = CompState::Button { pressed: false };
+        state_rev += 1;
+        run(&mut live, &c, state_rev, 2200, &mut log);
+        assert!(log.iter().any(|l| l.contains("HOLD -> CHARGE")), "{log:?}");
+        assert!(bank(&live) > 220.0, "recharged after the hold-off, got {}", bank(&live));
+
+        // A bank above 310 V (e.g. a welded relay) trips the latched cutoff.
+        if let Some(session) = live.session.as_mut()
+            && let Some(dev) = session.device.as_any_mut().downcast_mut::<SimDevice>()
+        {
+            for comp in [c1, id(&c, "C2")] {
+                dev.power.set_cap_volts(comp, 318.0);
+            }
+        }
+        run(&mut live, &c, state_rev, 300, &mut log);
+        assert!(log.iter().any(|l| l.contains("FAULT: OVER 310 V")), "{log:?}");
+        assert_eq!(vis(&live, k1), Some(VisualState::RelayClosed(false)));
+    }
+
 }

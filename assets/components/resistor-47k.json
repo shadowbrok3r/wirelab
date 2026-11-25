@@ -22,7 +22,7 @@
       175,
       130
     ],
-    "width_mm": 10.0,
+    "width_mm": 10.16,
     "height_mm": 3.0
   },
   "sim": {
@@ -30,5 +30,6 @@
     "ohms": 47000.0
   },
   "actions": [],
-  "events": []
+  "events": [],
+  "leads": [[-2, 0], [2, 0]]
 }

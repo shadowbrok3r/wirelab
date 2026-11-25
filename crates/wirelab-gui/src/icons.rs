@@ -13,7 +13,13 @@ mod table {
 pub use table::*;
 
 /// Id keywords that pick an icon before the drawn shape does.
-const BY_ID: [(&str, Icon); 16] = [
+const BY_ID: [(&str, Icon); 22] = [
+    ("capacitor", PART_CAPACITOR),
+    ("diode", PART_DIODE),
+    ("dc-supply", PART_DC_SUPPLY),
+    ("hv-boost", PART_HV_BOOST),
+    ("weld-pen", PART_WELD_PEN),
+    ("weld-clamp", PART_WELD_CLAMP),
     ("dht", PART_DHT22),
     ("hc-sr04", PART_ULTRASONIC),
     ("ultrasonic", PART_ULTRASONIC),
@@ -84,6 +90,8 @@ pub fn category(name: &str) -> Icon {
         "display" => CAT_DISPLAY,
         "passive" => CAT_PASSIVE,
         "routing" => CAT_ROUTING,
+        "power" => CAT_POWER,
+        "welding" => CAT_WELDING,
         _ => CAT_OTHER,
     }
 }

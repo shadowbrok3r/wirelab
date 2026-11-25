@@ -1,0 +1,44 @@
+{
+  "id": "resistor-2k",
+  "name": "2 kOhm Resistor",
+  "category": "Passive",
+  "description": "2 kohm 1/4W metal-film resistor. Bottom leg of high-voltage dividers (e.g. 300 k : 2 k for a 151:1 bank sense). Not polarized.",
+  "terminals": [
+    {
+      "id": "a",
+      "name": "Lead A",
+      "role": "a"
+    },
+    {
+      "id": "b",
+      "name": "Lead B",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "resistor",
+    "color": [
+      205,
+      175,
+      130
+    ],
+    "width_mm": 10.16,
+    "height_mm": 3.0
+  },
+  "sim": {
+    "kind": "resistor",
+    "ohms": 2000.0
+  },
+  "actions": [],
+  "events": [],
+  "leads": [
+    [
+      -2,
+      0
+    ],
+    [
+      2,
+      0
+    ]
+  ]
+}

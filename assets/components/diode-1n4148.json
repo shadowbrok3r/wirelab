@@ -1,0 +1,45 @@
+{
+  "id": "diode-1n4148",
+  "name": "1N4148 Signal Diode",
+  "category": "Passive",
+  "description": "Fast small-signal silicon diode, 100 V / 200 mA. Band marks the cathode. Used here as an ADC clamp to 3V3.",
+  "value": "1N4148",
+  "rating": "100 V, 200 mA",
+  "terminals": [
+    {
+      "id": "anode",
+      "name": "Anode",
+      "role": "anode"
+    },
+    {
+      "id": "cathode",
+      "name": "Cathode (band)",
+      "role": "cathode"
+    }
+  ],
+  "visual": {
+    "shape": "generic",
+    "color": [
+      200,
+      120,
+      60
+    ],
+    "width_mm": 10.16,
+    "height_mm": 2.6
+  },
+  "sim": {
+    "kind": "diode",
+    "forward_mv": 620.0,
+    "on_ohms": 8.0
+  },
+  "leads": [
+    [
+      -2,
+      0
+    ],
+    [
+      2,
+      0
+    ]
+  ]
+}

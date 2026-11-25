@@ -34,6 +34,7 @@ fn mini_board() -> BoardProfile {
         notes: vec![],
         specs: vec![],
         features: Default::default(),
+        header: None,
         pins: vec![
             pin("GND1", PinKind::Gnd, PinCaps::empty(), 0),
             pin("3V3", PinKind::V3_3, PinCaps::empty(), 1),
@@ -73,6 +74,9 @@ fn mini_lib() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "res220".into(),
@@ -90,6 +94,9 @@ fn mini_lib() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "button".into(),
@@ -107,6 +114,9 @@ fn mini_lib() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "pot".into(),
@@ -128,6 +138,9 @@ fn mini_lib() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib
 }

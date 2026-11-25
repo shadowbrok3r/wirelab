@@ -392,6 +392,15 @@ impl WireLabApp {
                     "on_start() · on_tick(dt) · on_pin(gpio, high)",
                     "rgb(r,g,b), pin(n)…",
                 ),
+                SimModel::DcSupply { .. }
+                | SimModel::HvBoost { .. }
+                | SimModel::Capacitor { .. }
+                | SimModel::Diode { .. }
+                | SimModel::ArcContact { .. }
+                | SimModel::Conductor { .. } => (
+                    "on_start() · on_tick(dt)",
+                    "power-stage part: read it through a divider on an ADC pin",
+                ),
             }
         };
         let names = wirelab_core::script::component_names(&self.project.circuit, &self.lib);

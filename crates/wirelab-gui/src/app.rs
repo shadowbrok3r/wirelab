@@ -29,6 +29,7 @@ pub enum Selection {
     Comps(Vec<CompId>),
     Wire(WireId),
     Pin(String),
+    Breadboard(wirelab_core::circuit::BbId),
 }
 
 impl Selection {
@@ -55,6 +56,8 @@ pub struct ModelCache {
     pub netlist: Netlist,
     pub bindings: Bindings,
     pub lints: Vec<Lint>,
+    /// Leads and header pins sitting in breadboard holes.
+    pub seating: wirelab_core::breadboard::Seating,
 }
 
 /// A parked (non-active) board's live session plus everything its
@@ -231,6 +234,8 @@ pub struct WireLabApp {
     pub lcd_texture: crate::lcd::LcdTexture,
 }
 
+static EMBEDDED_ASSETS: include_dir::Dir<'static> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../assets");
+
 fn find_assets_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("WIRELAB_ASSETS") {
         return PathBuf::from(dir);
@@ -244,7 +249,25 @@ fn find_assets_dir() -> PathBuf {
             return c;
         }
     }
-    PathBuf::from("assets")
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .and_then(|base| unpack_embedded_assets(&base))
+        .unwrap_or_else(|| PathBuf::from("assets"))
+}
+
+/// Unpacks the built-in assets under `base/wirelab`, once per version.
+fn unpack_embedded_assets(base: &std::path::Path) -> Option<PathBuf> {
+    let dir = base.join("wirelab").join(format!("assets-{}", env!("CARGO_PKG_VERSION")));
+    if !dir.join("boards").exists() {
+        let stage = base.join("wirelab").join(format!("assets-{}.part", env!("CARGO_PKG_VERSION")));
+        let _ = std::fs::remove_dir_all(&stage);
+        std::fs::create_dir_all(&stage).ok()?;
+        EMBEDDED_ASSETS.extract(&stage).ok()?;
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::rename(&stage, &dir).ok()?;
+    }
+    Some(dir)
 }
 
 impl WireLabApp {
@@ -393,7 +416,8 @@ impl WireLabApp {
         let netlist = Netlist::build(&self.project.circuit, board, &self.lib);
         let (_msgs, bindings) = plan_setup(&self.project.circuit, board, &self.lib, &netlist);
         let lints = validate(&self.project.circuit, board, &self.lib, &netlist);
-        self.cache = ModelCache { rev: self.topo_rev, netlist, bindings, lints };
+        let seating = wirelab_core::breadboard::seating(&self.project.circuit, Some(board), &self.lib);
+        self.cache = ModelCache { rev: self.topo_rev, netlist, bindings, lints, seating };
     }
 
     pub(crate) fn log(&mut self, line: impl Into<String>) {
@@ -419,6 +443,31 @@ impl WireLabApp {
                 self.project_path = Some(path);
             }
             Err(e) => self.log(format!("save failed: {e}")),
+        }
+    }
+
+    /// Writes the KiCad schematic, perfboard drawing and net/wire tables of the active board.
+    fn export_docs(&mut self) {
+        let Some(dir) = rfd::FileDialog::new().set_title("Folder for the wiring documents").pick_folder() else {
+            return;
+        };
+        self.project.sync_active();
+        let Some(board) = self.lib.board(&self.project.circuit.board_id) else {
+            self.log("export failed: unknown board");
+            return;
+        };
+        let name = if self.project.boards.len() > 1 {
+            format!("{} {}", self.project.name, self.project.boards[self.project.active].name)
+        } else {
+            self.project.name.clone()
+        };
+        match wirelab_core::export::export_all(&name, &self.project.circuit, board, &self.lib, &dir) {
+            Ok(files) => {
+                for f in files {
+                    self.log(format!("exported {}", f.display()));
+                }
+            }
+            Err(e) => self.log(format!("export failed: {e}")),
         }
     }
 
@@ -639,6 +688,10 @@ impl WireLabApp {
             }
             if ui_kit::menu_item(ui, ph::EXPORT, "Save as…").clicked() {
                 self.save_project(true);
+                ui.close();
+            }
+            if ui_kit::menu_item(ui, ph::FILE_TEXT, "Export wiring docs…").clicked() {
+                self.export_docs();
                 ui.close();
             }
             if !self.examples.is_empty() {
@@ -1156,5 +1209,22 @@ mod tests {
         let theme = egui_theme_kit::persist::load_file(&path).expect("theme.json loads as a kit theme");
         assert!(theme.style.visuals.dark_mode);
         assert_eq!(theme.style.visuals.panel_fill, egui::Color32::from_rgb(0, 0, 0));
+    }
+}
+
+#[cfg(test)]
+mod embedded_assets_tests {
+    #[test]
+    fn unpacks_a_complete_library_once() {
+        let base = std::env::temp_dir().join(format!("wirelab-assets-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = super::unpack_embedded_assets(&base).expect("unpacked");
+        for f in ["boards/esp32-c6-lcd-147.json", "breadboards/electrocookie-mini.json", "examples/22-cd-welder-electrocookie.wirelab.json", "theme.json"] {
+            assert!(dir.join(f).is_file(), "missing {f}");
+        }
+        let lib = wirelab_core::library::Library::load(&dir.join("boards"), &dir.join("components")).expect("library");
+        assert!(lib.breadboard("electrocookie-half").is_some());
+        assert_eq!(super::unpack_embedded_assets(&base), Some(dir));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

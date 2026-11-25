@@ -13,12 +13,33 @@ pub struct CompId(pub u32);
 #[serde(transparent)]
 pub struct WireId(pub u32);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct BbId(pub u32);
+
 /// One end of a wire: a board pin or a component terminal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "at", rename_all = "snake_case")]
 pub enum Endpoint {
     BoardPin { key: String },
     Terminal { comp: CompId, terminal: String },
+    /// A breadboard hole by printed name, e.g. "E12".
+    Hole { bb: BbId, hole: String },
+}
+
+/// A solderable breadboard placed on the canvas.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlacedBreadboard {
+    pub id: BbId,
+    /// Key into the breadboard library.
+    pub profile: String,
+    /// Canvas position in millimetres, board centre.
+    pub pos: [f32; 2],
+    /// 0, 90, 180 or 270.
+    #[serde(default)]
+    pub rotation: u16,
+    #[serde(default)]
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +78,12 @@ pub struct Wire {
     /// Optional manual routing points in canvas millimetres.
     #[serde(default)]
     pub waypoints: Vec<[f32; 2]>,
+    /// Build label for wiring tables, e.g. "W1".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    /// Physical wire spec, e.g. "12 AWG stranded silicone, 600 V".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub spec: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,10 +93,30 @@ pub struct Circuit {
     /// Board position on the canvas in millimetres, top-left corner.
     #[serde(default)]
     pub board_pos: [f32; 2],
+    /// Dev board quarter turn about its centre, in degrees.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub board_rotation: u16,
     pub components: BTreeMap<CompId, PlacedComponent>,
     pub wires: BTreeMap<WireId, Wire>,
     next_comp: u32,
     next_wire: u32,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub breadboards: BTreeMap<BbId, PlacedBreadboard>,
+    #[serde(default = "first_id")]
+    next_bb: u32,
+    /// Net names, each pinned to one endpoint on the named net.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub net_names: BTreeMap<String, Endpoint>,
+    /// Schematic placement and sheet notes for exports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schematic: Option<crate::export::SchematicLayout>,
+    /// Physical perfboard build for exports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perf: Option<crate::perf::PerfLayout>,
+}
+
+fn first_id() -> u32 {
+    1
 }
 
 impl Circuit {
@@ -77,10 +124,16 @@ impl Circuit {
         Circuit {
             board_id: board_id.to_string(),
             board_pos: [0.0, 0.0],
+            board_rotation: 0,
             components: BTreeMap::new(),
             wires: BTreeMap::new(),
             next_comp: 1,
             next_wire: 1,
+            breadboards: BTreeMap::new(),
+            next_bb: 1,
+            net_names: BTreeMap::new(),
+            schematic: None,
+            perf: None,
         }
     }
 
@@ -95,7 +148,10 @@ impl Circuit {
     pub fn add_wire(&mut self, a: Endpoint, b: Endpoint, color: [u8; 3]) -> WireId {
         let id = WireId(self.next_wire);
         self.next_wire += 1;
-        self.wires.insert(id, Wire { id, a, b, color, waypoints: Vec::new() });
+        self.wires.insert(
+            id,
+            Wire { id, a, b, color, waypoints: Vec::new(), label: String::new(), spec: String::new() },
+        );
         id
     }
 
@@ -104,6 +160,24 @@ impl Circuit {
         self.components.remove(&id);
         self.wires.retain(|_, w| {
             let touches = |e: &Endpoint| matches!(e, Endpoint::Terminal { comp, .. } if *comp == id);
+            !touches(&w.a) && !touches(&w.b)
+        });
+    }
+
+    pub fn add_breadboard(&mut self, mut bb: PlacedBreadboard) -> BbId {
+        self.next_bb = self.next_bb.max(self.breadboards.keys().map(|k| k.0 + 1).max().unwrap_or(1));
+        let id = BbId(self.next_bb);
+        self.next_bb += 1;
+        bb.id = id;
+        self.breadboards.insert(id, bb);
+        id
+    }
+
+    /// Remove a breadboard and every wire landing on its holes.
+    pub fn remove_breadboard(&mut self, id: BbId) {
+        self.breadboards.remove(&id);
+        self.wires.retain(|_, w| {
+            let touches = |e: &Endpoint| matches!(e, Endpoint::Hole { bb, .. } if *bb == id);
             !touches(&w.a) && !touches(&w.b)
         });
     }
@@ -140,4 +214,8 @@ impl Circuit {
     pub fn wires_at(&self, ep: &Endpoint) -> impl Iterator<Item = &Wire> {
         self.wires.values().filter(move |w| &w.a == ep || &w.b == ep)
     }
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
 }

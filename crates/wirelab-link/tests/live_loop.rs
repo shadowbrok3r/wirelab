@@ -35,6 +35,7 @@ fn board() -> BoardProfile {
         notes: vec![],
         specs: vec![],
         features: Default::default(),
+        header: None,
         pins: vec![
             BoardPin {
                 key: "GND1".into(),
@@ -67,6 +68,9 @@ fn library() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "r220".into(),
@@ -79,6 +83,9 @@ fn library() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "button".into(),
@@ -91,6 +98,9 @@ fn library() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib
 }

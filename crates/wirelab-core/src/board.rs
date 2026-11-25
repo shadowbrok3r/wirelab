@@ -117,6 +117,19 @@ pub struct BoardFeatures {
     /// Boot/download button and the strapping GPIO it pulls low.
     #[serde(default)]
     pub boot_button_gpio: Option<u8>,
+    /// On-board display glass `[x, y, w, h]` in board millimetres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<[f32; 4]>,
+}
+
+/// Real header geometry, so header pins seat into breadboard holes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct HeaderGeometry {
+    pub pitch_mm: f32,
+    /// Centre-to-centre distance between the two header rows.
+    pub row_spacing_mm: f32,
+    /// Distance from the USB-end board edge to the index-0 pin.
+    pub first_pin_mm: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +151,9 @@ pub struct BoardProfile {
     pub specs: Vec<String>,
     #[serde(default)]
     pub features: BoardFeatures,
+    /// Measured header geometry; unset = pins drawn evenly spaced and never seated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<HeaderGeometry>,
     pub pins: Vec<BoardPin>,
 }
 

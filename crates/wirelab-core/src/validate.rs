@@ -81,6 +81,7 @@ pub fn validate(
         }
     }
 
+    let seats = crate::breadboard::seating(circuit, Some(board), lib);
     for comp in circuit.components.values() {
         let Some(def) = lib.component(&comp.def_id) else {
             push(&mut lints, Severity::Error, format!("unknown component definition '{}'", comp.def_id));
@@ -91,8 +92,15 @@ pub fn validate(
         let mut unwired = Vec::new();
         for t in &def.terminals {
             let ep = Endpoint::Terminal { comp: comp.id, terminal: t.id.clone() };
-            let wired = circuit.wires_at(&ep).next().is_some();
-            if !wired {
+            let own_hole = seats.seat_of(&ep).map(|x| Endpoint::Hole { bb: x.bb, hole: x.hole_name.clone() });
+            // A seated lead is wired when its strip or rail reaches anything else.
+            let via_board = nl
+                .net_of(&ep)
+                .is_some_and(|n| nl.nets[n].endpoints.iter().any(|e| e != &ep && Some(e) != own_hole.as_ref()));
+            let wired = circuit.wires_at(&ep).next().is_some() || via_board;
+            // A relay's spare contact is normally left open.
+            let spare = t.role == crate::component::TerminalRole::NormallyClosed;
+            if !wired && !spare {
                 unwired.push(t.name.clone());
             }
         }
@@ -146,9 +154,12 @@ pub fn validate(
 
     // A wire joining both ends of one component short-circuits it.
     for wire in circuit.wires.values() {
-        if let (Endpoint::Terminal { comp: ca, .. }, Endpoint::Terminal { comp: cb, .. }) =
-            (&wire.a, &wire.b)
+        if let (
+            Endpoint::Terminal { comp: ca, terminal: ta },
+            Endpoint::Terminal { comp: cb, terminal: tb },
+        ) = (&wire.a, &wire.b)
             && ca == cb
+            && !shared_return(circuit, lib, *ca, ta, tb)
         {
             let name = circuit
                 .components
@@ -237,4 +248,18 @@ pub fn validate(
     }
 
     lints
+}
+
+/// True when two terminals are a non-isolated module's common input/output return,
+/// which a wire legitimately joins.
+fn shared_return(circuit: &Circuit, lib: &Library, comp: crate::circuit::CompId, a: &str, b: &str) -> bool {
+    use crate::component::TerminalRole;
+    let Some(def) = circuit.components.get(&comp).and_then(|c| lib.component(&c.def_id)) else {
+        return false;
+    };
+    let role = |t: &str| def.terminal(t).map(|t| t.role);
+    matches!(
+        (role(a), role(b)),
+        (Some(TerminalRole::InNeg), Some(TerminalRole::OutNeg)) | (Some(TerminalRole::OutNeg), Some(TerminalRole::InNeg))
+    )
 }

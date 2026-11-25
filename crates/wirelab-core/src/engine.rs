@@ -240,7 +240,14 @@ pub fn plan_setup(
                         b.analog.insert(comp.id, gpio);
                     }
             }
-            SimModel::Resistor { .. } | SimModel::Generic => {}
+            SimModel::Resistor { .. }
+            | SimModel::Generic
+            | SimModel::DcSupply { .. }
+            | SimModel::HvBoost { .. }
+            | SimModel::Capacitor { .. }
+            | SimModel::Diode { .. }
+            | SimModel::ArcContact { .. }
+            | SimModel::Conductor { .. } => {}
         }
     }
 

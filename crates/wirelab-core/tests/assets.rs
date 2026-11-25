@@ -98,7 +98,7 @@ fn examples_load_and_run() {
             );
         }
     }
-    assert_eq!(n, 20, "expected the twenty shipped examples");
+    assert_eq!(n, 22, "expected the twenty-two shipped examples");
 }
 
 /// The LCD messenger: a press on the C5 desk board sends a message to the

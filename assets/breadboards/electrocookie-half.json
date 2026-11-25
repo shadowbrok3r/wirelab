@@ -1,0 +1,421 @@
+{
+ "id": "electrocookie-half",
+ "name": "ElectroCookie half-size solderable breadboard",
+ "vendor": "ElectroCookie",
+ "width_mm": 88.9,
+ "height_mm": 52.07,
+ "corner_radius_mm": 3.5,
+ "pitch_mm": 2.54,
+ "colors": {
+  "mask": [
+   22,
+   22,
+   24
+  ],
+  "pad": [
+   208,
+   172,
+   84
+  ],
+  "silk": [
+   236,
+   236,
+   232
+  ]
+ },
+ "lines": [
+  {
+   "name": "J",
+   "start": [
+    7.62,
+    12.065
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "I",
+   "start": [
+    7.62,
+    14.605
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "H",
+   "start": [
+    7.62,
+    17.145
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "G",
+   "start": [
+    7.62,
+    19.685
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "F",
+   "start": [
+    7.62,
+    22.225
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "F-J"
+   }
+  },
+  {
+   "name": "E",
+   "start": [
+    7.62,
+    29.845
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "D",
+   "start": [
+    7.62,
+    32.385
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "C",
+   "start": [
+    7.62,
+    34.925
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "B",
+   "start": [
+    7.62,
+    37.465
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "A",
+   "start": [
+    7.62,
+    40.005
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "strip",
+    "group": "A-E"
+   }
+  },
+  {
+   "name": "-J",
+   "start": [
+    7.62,
+    2.667
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "rail"
+   },
+   "polarity": "-",
+   "note": "outer rail beside row J"
+  },
+  {
+   "name": "+J",
+   "start": [
+    7.62,
+    5.207
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "rail"
+   },
+   "polarity": "+",
+   "note": "inner rail beside row J"
+  },
+  {
+   "name": "-A",
+   "start": [
+    7.62,
+    46.863
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "rail"
+   },
+   "polarity": "-",
+   "note": "inner rail beside row A"
+  },
+  {
+   "name": "+A",
+   "start": [
+    7.62,
+    49.403
+   ],
+   "step": [
+    1,
+    0
+   ],
+   "count": 30,
+   "bus": {
+    "kind": "rail"
+   },
+   "polarity": "+",
+   "note": "outer rail beside row A"
+  },
+  {
+   "name": "PJL",
+   "start": [
+    2.54,
+    24.765
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 2,
+   "bus": {
+    "kind": "none"
+   },
+   "note": "power jumper pads, column-1 end; which rails they join is unverified"
+  },
+  {
+   "name": "PJR",
+   "start": [
+    86.36,
+    24.765
+   ],
+   "step": [
+    0,
+    1
+   ],
+   "count": 2,
+   "bus": {
+    "kind": "none"
+   },
+   "note": "power jumper pads, column-30 end; which rails they join is unverified"
+  }
+ ],
+ "mounts": [
+  {
+   "at": [
+    7.62,
+    26.035
+   ],
+   "dia_mm": 3.2,
+   "plated": true,
+   "label": "M3"
+  },
+  {
+   "at": [
+    81.28,
+    26.035
+   ],
+   "dia_mm": 3.2,
+   "plated": true,
+   "label": "M3"
+  },
+  {
+   "at": [
+    5.1,
+    8.235
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  },
+  {
+   "at": [
+    83.8,
+    8.235
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  },
+  {
+   "at": [
+    5.1,
+    43.835
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  },
+  {
+   "at": [
+    83.8,
+    43.835
+   ],
+   "dia_mm": 2.2,
+   "plated": false,
+   "label": "M2"
+  }
+ ],
+ "silk": {
+  "numbers": [
+   {
+    "line": "J",
+    "offset": [
+     0,
+     -3.1
+    ]
+   },
+   {
+    "line": "A",
+    "offset": [
+     0,
+     3.4
+    ]
+   }
+  ],
+  "names": [
+   {
+    "index": 1,
+    "offset": [
+     -2.65,
+     0
+    ]
+   },
+   {
+    "index": 30,
+    "offset": [
+     2.65,
+     0
+    ]
+   },
+   {
+    "index": 1,
+    "offset": [
+     -2.65,
+     0
+    ],
+    "lines": [
+     "-J",
+     "+J",
+     "-A",
+     "+A"
+    ]
+   },
+   {
+    "index": 30,
+    "offset": [
+     2.65,
+     0
+    ],
+    "lines": [
+     "-J",
+     "+J",
+     "-A",
+     "+A"
+    ]
+   }
+  ],
+  "texts": [
+   {
+    "text": "ElectroCookie",
+    "at": [
+     44.45,
+     26.035
+    ],
+    "size_mm": 2.4
+   }
+  ],
+  "border_inset_mm": 1.2
+ },
+ "notes": [
+  "Geometry measured from the vendor's dimension drawing: 3.5 x 2.05 in board, 0.1 in pitch, M3 centre holes 2.9 in apart, M2 corner holes 3.1 x 1.4 in.",
+  "Rails sit 0.3 pitch off the main grid (8.2 and 9.2 pitches from the centre line) - measured from the drawing, check with calipers before relying on a part spanning rail to strip.",
+  "A-E and F-J are bussed per numbered column; each of the four rails runs the full 30 columns.",
+  "Power jumper pads (PJL, PJR): the drawing does not show which rails they join, so WireLab treats them as unconnected pads. Check with a meter."
+ ]
+}

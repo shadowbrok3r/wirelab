@@ -1,0 +1,55 @@
+{
+  "id": "capacitor-photoflash-95u",
+  "name": "Photoflash Capacitor 95 uF 330 V",
+  "category": "Power",
+  "description": "Camion photoflash electrolytic, 95 uF / 330 V. Polarized, radial leads 5 mm apart; lies flat with its legs in two holes of one column. Built for fast pulse discharge. Treat any charged bank as lethal until measured below 36 V.",
+  "value": "95 uF",
+  "rating": "330 V photoflash",
+  "terminals": [
+    {
+      "id": "pos",
+      "name": "+",
+      "role": "positive"
+    },
+    {
+      "id": "neg",
+      "name": "-",
+      "role": "negative"
+    }
+  ],
+  "visual": {
+    "shape": "generic",
+    "color": [
+      40,
+      40,
+      46
+    ],
+    "width_mm": 17.78,
+    "height_mm": 12.0
+  },
+  "sim": {
+    "kind": "capacitor",
+    "farads": 9.5e-05,
+    "v_rated": 330.0,
+    "esr_ohms": 0.4
+  },
+  "props": [
+    {
+      "key": "esr_ohms",
+      "name": "ESR (ohm, assumed)",
+      "min": 0.01,
+      "max": 5.0,
+      "default": 0.4
+    }
+  ],
+  "leads": [
+    [
+      -4,
+      -1
+    ],
+    [
+      -4,
+      1
+    ]
+  ]
+}

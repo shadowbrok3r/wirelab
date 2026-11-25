@@ -37,7 +37,7 @@ pub enum Cmd {
     Validate,
     AddComponent { def_id: String, x: f32, y: f32, label: Option<String> },
     RemoveComponent { comp: String },
-    AddWire { a: EndpointArg, b: EndpointArg },
+    AddWire { a: EndpointArg, b: EndpointArg, waypoints: Vec<[f32; 2]> },
     RemoveWire { id: u32 },
     AutoWire { comps: Vec<String> },
     FixLints,
@@ -46,6 +46,7 @@ pub enum Cmd {
     ConnectSimulator,
     Disconnect,
     SetComponentState { comp: String, pressed: Option<bool>, on: Option<bool>, value: Option<f32> },
+    SetProp { comp: String, key: String, value: Option<f64> },
     ReadLive,
     OpenExample { name: String },
     GetFlow,
@@ -65,6 +66,12 @@ pub enum Cmd {
     /// Whole project pushed from a remote editor; parked as a pending import
     /// until the desktop user accepts it. Never applied by the network alone.
     ImportProject { project: Project, from: Option<String> },
+    AddBreadboard { profile: String, x: f32, y: f32, rotation: u16, label: Option<String> },
+    MoveBreadboard { bb: u32, x: Option<f32>, y: Option<f32>, rotation: Option<u16> },
+    PlaceBoard { x: Option<f32>, y: Option<f32>, rotation: Option<u16> },
+    RemoveBreadboard { bb: u32 },
+    SeatComponent { comp: String, terminal: String, hole: String, bb: Option<u32>, rotation: Option<u16>, span: Option<f32> },
+    InspectHole { hole: String, bb: Option<u32> },
 }
 
 /// Parse a remote structural-edit body: `{board_id, op, ...}`.
@@ -148,6 +155,78 @@ pub struct EndpointArg {
     pub comp: Option<String>,
     /// Terminal id on that component, e.g. "anode", "a", "signal".
     pub terminal: Option<String>,
+    /// Breadboard hole by printed name, e.g. "E12" or "+A3". Mutually exclusive with pin/comp.
+    pub hole: Option<String>,
+    /// Breadboard id for `hole`; optional when only one breadboard is placed.
+    pub bb: Option<u32>,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct AddBreadboardArgs {
+    /// Breadboard profile id from list_library, e.g. "electrocookie-half".
+    pub profile: String,
+    /// Board centre on the canvas, mm.
+    pub x: f32,
+    pub y: f32,
+    /// 0, 90, 180 or 270 (clockwise).
+    pub rotation: Option<u16>,
+    pub label: Option<String>,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct MoveBreadboardArgs {
+    pub bb: u32,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// 0, 90, 180 or 270 (clockwise).
+    pub rotation: Option<u16>,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct SetPropArgs {
+    /// Component id or label, e.g. "PS1".
+    pub comp: String,
+    /// Prop key from list_library, e.g. "volts", "i_max_a", "v_set".
+    pub key: String,
+    /// New value, clamped to the prop's range; omit to restore the default.
+    pub value: Option<f64>,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct PlaceBoardArgs {
+    /// Top-left corner of the unrotated board, mm.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// 0, 90, 180 or 270 (clockwise) about the board's centre; 180 puts the USB end on top.
+    pub rotation: Option<u16>,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct BreadboardArg {
+    pub bb: u32,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct SeatArgs {
+    /// Component id (number) or script name / label.
+    pub comp: String,
+    /// Terminal to put in `hole`, e.g. "a", "anode".
+    pub terminal: String,
+    /// Hole name, e.g. "E12".
+    pub hole: String,
+    /// Breadboard id; optional when only one breadboard is placed.
+    pub bb: Option<u32>,
+    /// Part rotation to apply first: 0, 90, 180 or 270.
+    pub rotation: Option<u16>,
+    /// Lead span in holes for bendable two-lead parts (resistors, diodes, caps).
+    pub span: Option<f32>,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct HoleArgs {
+    /// Hole name, e.g. "E12".
+    pub hole: String,
+    pub bb: Option<u32>,
 }
 
 pub struct McpRequest {
@@ -433,6 +512,9 @@ pub struct CompArg {
 pub struct AddWireArgs {
     pub a: EndpointArg,
     pub b: EndpointArg,
+    /// Optional routing points in canvas mm; the wire runs through them with orthogonal legs.
+    #[serde(default)]
+    pub waypoints: Vec<[f32; 2]>,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -546,9 +628,39 @@ impl WirelabTools {
         self.ask(Cmd::RemoveComponent { comp: a.comp }).await
     }
 
-    #[tool(description = "Wire two points together. Endpoints are a board pin OR a component terminal. Electrically dangerous wires (rail shorts) are refused with the reason.")]
+    #[tool(description = "Wire two points together. Endpoints are a board pin, a component terminal, or a breadboard hole ({\"hole\": \"E12\"}). Electrically dangerous wires (rail shorts) are refused with the reason.")]
     async fn add_wire(&self, Parameters(a): Parameters<AddWireArgs>) -> String {
-        self.ask(Cmd::AddWire { a: a.a, b: a.b }).await
+        self.ask(Cmd::AddWire { a: a.a, b: a.b, waypoints: a.waypoints }).await
+    }
+
+    #[tool(description = "Place a breadboard (profile ids in list_library) centred at x, y mm. Parts with leads snap into its holes; holes in one strip or rail share copper.")]
+    async fn add_breadboard(&self, Parameters(a): Parameters<AddBreadboardArgs>) -> String {
+        self.ask(Cmd::AddBreadboard { profile: a.profile, x: a.x, y: a.y, rotation: a.rotation.unwrap_or(0), label: a.label }).await
+    }
+
+    #[tool(description = "Move or rotate a breadboard; parts fully seated in it travel with it.")]
+    async fn move_breadboard(&self, Parameters(a): Parameters<MoveBreadboardArgs>) -> String {
+        self.ask(Cmd::MoveBreadboard { bb: a.bb, x: a.x, y: a.y, rotation: a.rotation }).await
+    }
+
+    #[tool(description = "Move or rotate the dev board. Its header pins seat into breadboard holes they land on.")]
+    async fn place_board(&self, Parameters(a): Parameters<PlaceBoardArgs>) -> String {
+        self.ask(Cmd::PlaceBoard { x: a.x, y: a.y, rotation: a.rotation }).await
+    }
+
+    #[tool(description = "Delete a breadboard and the wires landing on its holes.")]
+    async fn remove_breadboard(&self, Parameters(a): Parameters<BreadboardArg>) -> String {
+        self.ask(Cmd::RemoveBreadboard { bb: a.bb }).await
+    }
+
+    #[tool(description = "Insert a part into a breadboard: moves it so `terminal` lands in `hole` (after the optional rotation and lead span). Returns where every lead ended up; leads that miss a hole are listed.")]
+    async fn seat_component(&self, Parameters(a): Parameters<SeatArgs>) -> String {
+        self.ask(Cmd::SeatComponent { comp: a.comp, terminal: a.terminal, hole: a.hole, bb: a.bb, rotation: a.rotation, span: a.span }).await
+    }
+
+    #[tool(description = "What a breadboard hole connects to: its strip or rail, every hole on that copper, and the part leads, pins and wires on the same net.")]
+    async fn inspect_hole(&self, Parameters(a): Parameters<HoleArgs>) -> String {
+        self.ask(Cmd::InspectHole { hole: a.hole, bb: a.bb }).await
     }
 
     #[tool(description = "Delete a wire by id (ids come from get_circuit).")]
@@ -584,6 +696,11 @@ impl WirelabTools {
     #[tool(description = "Disconnect the current device or simulator.")]
     async fn disconnect(&self) -> String {
         self.ask(Cmd::Disconnect).await
+    }
+
+    #[tool(description = "Set a component value prop (supply volts / current rating, boost set point, resistance, ...). The simulator picks it up live.")]
+    async fn set_prop(&self, Parameters(a): Parameters<SetPropArgs>) -> String {
+        self.ask(Cmd::SetProp { comp: a.comp, key: a.key, value: a.value }).await
     }
 
     #[tool(description = "Poke a component's live state: press/release a button, flip a switch, move a pot (0..1).")]
@@ -670,7 +787,64 @@ impl WireLabApp {
         Err(format!("no component '{spec}' (use an id or a script name from get_circuit)"))
     }
 
+    fn resolve_bb(&self, bb: Option<u32>) -> Result<wirelab_core::circuit::BbId, String> {
+        let boards = &self.project.circuit.breadboards;
+        match bb {
+            Some(n) => {
+                let id = wirelab_core::circuit::BbId(n);
+                boards.contains_key(&id).then_some(id).ok_or_else(|| format!("no breadboard {n}"))
+            }
+            None if boards.len() == 1 => Ok(*boards.keys().next().unwrap()),
+            None if boards.is_empty() => Err("no breadboard placed (add_breadboard first)".into()),
+            None => Err("several breadboards placed: pass bb".into()),
+        }
+    }
+
+    fn resolve_hole(&self, bb: Option<u32>, hole: &str) -> Result<(wirelab_core::circuit::BbId, wirelab_core::breadboard::HoleRef, String), String> {
+        let id = self.resolve_bb(bb)?;
+        let profile = self
+            .lib
+            .breadboard(&self.project.circuit.breadboards[&id].profile)
+            .ok_or("breadboard profile missing from the library")?;
+        let h = profile.parse_hole(hole).ok_or_else(|| {
+            let lines: Vec<String> = profile.lines.iter().map(|l| format!("{}{}-{}", l.name, l.first, l.first + l.count - 1)).collect();
+            format!("no hole '{hole}' on {} (lines: {})", profile.name, lines.join(", "))
+        })?;
+        Ok((id, h, profile.hole_name(h)))
+    }
+
+    fn seats_json(&self, only: Option<CompId>) -> (Vec<Value>, Vec<Value>) {
+        let board = self.lib.board(&self.project.circuit.board_id);
+        let seating = wirelab_core::breadboard::seating(&self.project.circuit, board, &self.lib);
+        let names = wirelab_core::script::component_names(&self.project.circuit, &self.lib);
+        let keep = |ep: &Endpoint| match (only, ep) {
+            (None, _) => true,
+            (Some(id), Endpoint::Terminal { comp, .. }) => *comp == id,
+            _ => false,
+        };
+        let seats = seating
+            .seats
+            .iter()
+            .filter(|s| keep(&s.ep))
+            .map(|s| json!({ "lead": self.describe_endpoint(&s.ep, &names), "bb": s.bb.0, "hole": s.hole_name }))
+            .collect();
+        let misses = seating
+            .misses
+            .iter()
+            .filter(|s| keep(&s.ep))
+            .map(|s| json!({ "lead": self.describe_endpoint(&s.ep, &names), "bb": s.bb.0, "at": s.world }))
+            .collect();
+        (seats, misses)
+    }
+
     fn resolve_endpoint(&self, arg: &EndpointArg) -> Result<Endpoint, String> {
+        if let Some(hole) = &arg.hole {
+            if arg.pin.is_some() || arg.comp.is_some() {
+                return Err("endpoint needs exactly one of pin, comp+terminal or hole".into());
+            }
+            let (bb, _, name) = self.resolve_hole(arg.bb, hole)?;
+            return Ok(Endpoint::Hole { bb, hole: name });
+        }
         match (&arg.pin, &arg.comp) {
             (Some(pin), None) => {
                 let board = self.lib.board(&self.project.circuit.board_id).ok_or("no board")?;
@@ -716,6 +890,7 @@ impl WireLabApp {
                 "comp": names.get(comp).cloned().unwrap_or_else(|| comp.0.to_string()),
                 "terminal": terminal,
             }),
+            Endpoint::Hole { bb, hole } => json!({ "bb": bb.0, "hole": hole }),
         }
     }
 
@@ -779,9 +954,20 @@ impl WireLabApp {
                         })
                     })
                     .collect();
+                let breadboards: Vec<Value> = self
+                    .project
+                    .circuit
+                    .breadboards
+                    .values()
+                    .map(|b| json!({ "id": b.id.0, "profile": b.profile, "pos": b.pos, "rotation": b.rotation, "label": b.label }))
+                    .collect();
+                let (seats, misses) = self.seats_json(None);
                 Ok(json!({
                     "project": self.project.name,
                     "board": self.project.circuit.board_id,
+                    "breadboards": breadboards,
+                    "seated_leads": seats,
+                    "leads_missing_holes": misses,
                     "components": comps,
                     "wires": wires,
                     "connected": self.live.connected(),
@@ -811,7 +997,26 @@ impl WireLabApp {
                     .values()
                     .map(|b| json!({"id": b.id, "name": b.name, "chip": b.chip.name()}))
                     .collect();
-                Ok(json!({ "components": comps, "boards": boards }))
+                let breadboards: Vec<Value> = self
+                    .lib
+                    .breadboards
+                    .values()
+                    .map(|p| {
+                        json!({
+                            "id": p.id,
+                            "name": p.name,
+                            "size_mm": [p.width_mm, p.height_mm],
+                            "lines": p.lines.iter().map(|l| json!({
+                                "name": l.name, "holes": format!("{}{}-{}{}", l.name, l.first, l.name, l.first + l.count - 1),
+                                "bus": l.bus, "polarity": l.polarity,
+                            })).collect::<Vec<_>>(),
+                            "notes": p.notes,
+                        })
+                    })
+                    .collect();
+                let leaded: Vec<&str> =
+                    self.lib.components.values().filter(|d| !d.leads.is_empty()).map(|d| d.id.as_str()).collect();
+                Ok(json!({ "components": comps, "boards": boards, "breadboards": breadboards, "breadboard_insertable": leaded }))
             }
             Cmd::Validate => Ok(json!({
                 "lints": self.lints_json(),
@@ -844,7 +1049,7 @@ impl WireLabApp {
                 self.topo_rev += 1;
                 Ok(json!({ "removed": id.0 }))
             }
-            Cmd::AddWire { a, b } => {
+            Cmd::AddWire { a, b, waypoints } => {
                 let ea = self.resolve_endpoint(&a)?;
                 let eb = self.resolve_endpoint(&b)?;
                 let board = self.lib.board(&self.project.circuit.board_id).ok_or("no board")?;
@@ -859,10 +1064,117 @@ impl WireLabApp {
                     WireVerdict::Ok => {
                         let color = [190, 120, 255];
                         let id = self.project.circuit.add_wire(ea, eb, color);
+                        if let Some(w) = self.project.circuit.wires.get_mut(&id) {
+                            w.waypoints = waypoints;
+                        }
                         self.topo_rev += 1;
                         Ok(json!({ "wire": id.0 }))
                     }
                 }
+            }
+            Cmd::AddBreadboard { profile, x, y, rotation, label } => {
+                let id = self.add_breadboard_at(&profile, [x, y]).ok_or_else(|| format!("unknown breadboard profile '{profile}' (see list_library)"))?;
+                if let Some(b) = self.project.circuit.breadboards.get_mut(&id) {
+                    b.pos = [x, y];
+                    b.rotation = rotation % 360 / 90 * 90;
+                    b.label = label.unwrap_or_default();
+                }
+                self.topo_rev += 1;
+                Ok(json!({ "bb": id.0 }))
+            }
+            Cmd::PlaceBoard { x, y, rotation } => {
+                let c = &mut self.project.circuit;
+                c.board_pos = [x.unwrap_or(c.board_pos[0]), y.unwrap_or(c.board_pos[1])];
+                if let Some(rot) = rotation {
+                    c.board_rotation = rot % 360 / 90 * 90;
+                }
+                let (pos, rot) = (c.board_pos, c.board_rotation);
+                self.topo_rev += 1;
+                Ok(json!({ "board_pos": pos, "rotation": rot }))
+            }
+            Cmd::MoveBreadboard { bb, x, y, rotation } => {
+                let id = self.resolve_bb(Some(bb))?;
+                let carried = self.parts_seated_in(id);
+                if let Some(rot) = rotation {
+                    let target = rot % 360 / 90 * 90;
+                    for _ in 0..4 {
+                        if self.project.circuit.breadboards[&id].rotation == target {
+                            break;
+                        }
+                        self.rotate_breadboard(id);
+                    }
+                }
+                let b = self.project.circuit.breadboards.get_mut(&id).ok_or("breadboard vanished")?;
+                let to = [x.unwrap_or(b.pos[0]), y.unwrap_or(b.pos[1])];
+                let delta = [to[0] - b.pos[0], to[1] - b.pos[1]];
+                b.pos = to;
+                for cid in carried {
+                    if let Some(c) = self.project.circuit.components.get_mut(&cid) {
+                        c.pos = [c.pos[0] + delta[0], c.pos[1] + delta[1]];
+                    }
+                }
+                self.topo_rev += 1;
+                Ok(json!({ "bb": bb, "pos": to, "rotation": self.project.circuit.breadboards[&id].rotation }))
+            }
+            Cmd::RemoveBreadboard { bb } => {
+                let id = self.resolve_bb(Some(bb))?;
+                self.project.circuit.remove_breadboard(id);
+                self.topo_rev += 1;
+                Ok(json!({ "removed": bb }))
+            }
+            Cmd::SeatComponent { comp, terminal, hole, bb, rotation, span } => {
+                let id = self.resolve_comp(&comp)?;
+                let (bb_id, _, hole_name) = self.resolve_hole(bb, &hole)?;
+                let target = wirelab_core::breadboard::hole_endpoint_world(&self.project.circuit, &self.lib, bb_id, &hole_name)
+                    .ok_or("hole position unavailable")?;
+                let c = self.project.circuit.components.get(&id).ok_or("component vanished")?;
+                let def = self.lib.component(&c.def_id).ok_or("component definition missing")?.clone();
+                if def.leads.is_empty() {
+                    return Err(format!("{} has no through-hole leads; wire it to the holes instead", def.name));
+                }
+                let idx = def
+                    .terminals
+                    .iter()
+                    .position(|t| t.id.eq_ignore_ascii_case(&terminal))
+                    .ok_or_else(|| format!("'{terminal}' is not a terminal of {}", def.name))?;
+                let c = self.project.circuit.components.get_mut(&id).ok_or("component vanished")?;
+                if let Some(r) = rotation {
+                    c.rotation = r % 360 / 90 * 90;
+                }
+                if let Some(s) = span {
+                    if def.leads.len() != 2 {
+                        return Err("span applies to two-lead parts only".into());
+                    }
+                    c.props.insert(wirelab_core::geometry::SPAN_PROP.into(), f64::from(s.round().max(1.0)));
+                }
+                let t = wirelab_core::geometry::terminal_world_pos(c, &def, idx);
+                c.pos = [c.pos[0] + target[0] - t[0], c.pos[1] + target[1] - t[1]];
+                self.topo_rev += 1;
+                let (seats, misses) = self.seats_json(Some(id));
+                Ok(json!({ "comp": id.0, "pos": self.project.circuit.components[&id].pos, "seated": seats, "missing_holes": misses }))
+            }
+            Cmd::InspectHole { hole, bb } => {
+                let (bb_id, h, name) = self.resolve_hole(bb, &hole)?;
+                let profile = self.lib.breadboard(&self.project.circuit.breadboards[&bb_id].profile).ok_or("profile missing")?.clone();
+                let board = self.lib.board(&self.project.circuit.board_id).ok_or("no board")?;
+                let nl = Netlist::build(&self.project.circuit, board, &self.lib);
+                let names = wirelab_core::script::component_names(&self.project.circuit, &self.lib);
+                let node = profile.node_of(h);
+                let on_node = |e: &Endpoint| matches!(e, Endpoint::Hole { bb, hole } if *bb == bb_id && profile.parse_hole(hole).is_some_and(|x| profile.node_of(x) == node));
+                let net = nl.nets.iter().find(|n| n.endpoints.iter().any(on_node));
+                let members: Vec<Value> = net
+                    .map(|n| n.endpoints.iter().filter(|e| !matches!(e, Endpoint::Hole { .. })).map(|e| self.describe_endpoint(e, &names)).collect())
+                    .unwrap_or_default();
+                let net_name = net.and_then(|n| {
+                    self.project.circuit.net_names.iter().find(|(_, ep)| nl.net_of(ep) == Some(n.id)).map(|(k, _)| k.clone())
+                });
+                Ok(json!({
+                    "hole": name,
+                    "copper": profile.node_label(h),
+                    "holes_on_copper": profile.bus_holes(h).into_iter().map(|o| profile.hole_name(o)).collect::<Vec<_>>(),
+                    "net": net_name,
+                    "connected": members,
+                }))
             }
             Cmd::RemoveWire { id } => {
                 let wid = WireId(id);
@@ -972,6 +1284,30 @@ impl WireLabApp {
             Cmd::Disconnect => {
                 self.live.disconnect(&mut self.console);
                 Ok(json!({ "status": "disconnected" }))
+            }
+            Cmd::SetProp { comp, key, value } => {
+                let id = self.resolve_comp(&comp)?;
+                let def_id = self.project.circuit.components.get(&id).ok_or("no such component")?.def_id.clone();
+                let def = self.lib.component(&def_id).ok_or("unknown part")?;
+                let Some(spec) = def.props.iter().find(|p| p.key == key) else {
+                    let keys: Vec<&str> = def.props.iter().map(|p| p.key.as_str()).collect();
+                    return Err(format!("{def_id} has no prop '{key}'; it has {keys:?}"));
+                };
+                let (min, max, default) = (spec.min, spec.max, spec.default);
+                let c = self.project.circuit.components.get_mut(&id).ok_or("no such component")?;
+                let v = match value {
+                    Some(v) => {
+                        let v = v.clamp(min, max);
+                        c.props.insert(key.clone(), v);
+                        v
+                    }
+                    None => {
+                        c.props.remove(&key);
+                        default
+                    }
+                };
+                self.topo_rev += 1;
+                Ok(json!({ "comp": id.0, "key": key, "value": v, "range": [min, max] }))
             }
             Cmd::SetComponentState { comp, pressed, on, value } => {
                 let id = self.resolve_comp(&comp)?;

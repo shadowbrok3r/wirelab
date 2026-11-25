@@ -10,10 +10,11 @@
   "visual": {
     "shape": "resistor",
     "color": [210, 180, 135],
-    "width_mm": 10.0,
+    "width_mm": 10.16,
     "height_mm": 3.0
   },
   "sim": { "kind": "resistor", "ohms": 1000.0 },
   "actions": [],
-  "events": []
+  "events": [],
+  "leads": [[-2, 0], [2, 0]]
 }

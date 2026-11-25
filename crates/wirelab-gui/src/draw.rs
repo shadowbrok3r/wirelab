@@ -6,7 +6,9 @@ use egui::epaint::{EllipseShape, Mesh, RectShape};
 use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use wirelab_core::board::{BoardPin, BoardProfile, PinKind, Side};
 use wirelab_core::circuit::PlacedComponent;
-use wirelab_core::component::{CompState, ComponentDef, Shape, SimModel, TerminalRole, VisualState};
+use wirelab_core::component::{
+    ArcPulse, BoostMode, CompState, ComponentDef, Shape, SimModel, TerminalRole, VisualState,
+};
 use wirelab_proto::PinMode;
 
 /// Short pad label for a terminal, e.g. "+", "NO", "SIG".
@@ -25,6 +27,12 @@ pub fn terminal_short_label(role: TerminalRole) -> &'static str {
         TerminalRole::Vcc => "V+",
         TerminalRole::Gnd => "G",
         TerminalRole::Signal => "SIG",
+        TerminalRole::Positive => "+",
+        TerminalRole::Negative => "−",
+        TerminalRole::InPos => "IN+",
+        TerminalRole::InNeg => "IN−",
+        TerminalRole::OutPos => "OUT+",
+        TerminalRole::OutNeg => "OUT−",
     }
 }
 
@@ -56,9 +64,15 @@ pub fn terminal_world_pos(comp: &PlacedComponent, def: &ComponentDef, index: usi
     wirelab_core::geometry::terminal_world_pos(comp, def, index)
 }
 
-/// Header pin position in world mm; USB end is the bottom of the board.
-pub fn board_pin_world_pos(board: &BoardProfile, pin: &BoardPin, board_pos: [f32; 2]) -> [f32; 2] {
-    wirelab_core::geometry::board_pin_world_pos(board, pin, board_pos)
+/// Header pin position in world mm for a board turned `rotation` degrees about its centre.
+pub fn board_pin_world_pos(board: &BoardProfile, pin: &BoardPin, board_pos: [f32; 2], rotation: u16) -> [f32; 2] {
+    wirelab_core::geometry::board_pin_world_pos(board, pin, board_pos, rotation)
+}
+
+/// Screen rect of a placed board; quarter turns keep it axis-aligned.
+pub fn board_screen_rect(view: &View, board: &BoardProfile, board_pos: [f32; 2], rotation: u16) -> Rect {
+    let [a, b] = wirelab_core::geometry::board_world_bounds(board, board_pos, rotation);
+    Rect::from_min_max(view.to_screen(a), view.to_screen(b))
 }
 
 pub fn pin_state_color(mode: PinMode, high: bool) -> Color32 {
@@ -101,15 +115,16 @@ pub enum BoardControl {
 pub fn board_feature_rects(
     board: &BoardProfile,
     board_pos: [f32; 2],
+    rotation: u16,
 ) -> Vec<(BoardControl, Rect)> {
     let at = |x_frac: f32, y_from_bottom: f32, w: f32, h: f32| {
-        Rect::from_min_size(
-            Pos2::new(
-                board_pos[0] + board.width_mm * x_frac - w / 2.0,
-                board_pos[1] + board.height_mm - y_from_bottom,
-            ),
-            Vec2::new(w, h),
-        )
+        let x0 = board.width_mm * x_frac - w / 2.0;
+        let y0 = board.height_mm - y_from_bottom;
+        let world = |p: [f32; 2]| {
+            let q = wirelab_core::geometry::board_local_to_world(board, board_pos, rotation, p);
+            Pos2::new(q[0], q[1])
+        };
+        Rect::from_two_pos(world([x0, y0]), world([x0 + w, y0 + h]))
     };
     let mut out = Vec::new();
     if board.features.reset_button {
@@ -131,6 +146,7 @@ pub fn draw_board(
     view: &View,
     board: &BoardProfile,
     board_pos: [f32; 2],
+    rotation: u16,
     hovered_pin: Option<&str>,
     live: Option<&dyn Fn(u8) -> PinLive>,
     group_keys: &[String],
@@ -138,11 +154,9 @@ pub fn draw_board(
     hovered_feature: Option<BoardControl>,
     rgb: Option<[u8; 3]>,
 ) {
-    let tl = view.to_screen(board_pos);
-    let br = view.to_screen([board_pos[0] + board.width_mm, board_pos[1] + board.height_mm]);
-    let rect = Rect::from_min_max(tl, br);
+    let rect = board_screen_rect(view, board, board_pos, rotation);
     let (w, h) = (board.width_mm, board.height_mm);
-    let l = Local::new(painter, view, board_pos, 0);
+    let l = Local::board(painter, view, board_pos, [w, h], rotation);
     let mask = Color32::from_rgb(18, 74, 48);
     l.shadow([0.0, 0.0, w, h], 1.1, 1.4);
     l.shaded([0.0, 0.0, w, h], 1.1, shade(mask, 1.25), shade(mask, 0.8));
@@ -158,24 +172,29 @@ pub fn draw_board(
         Stroke::new(1.0, Color32::from_white_alpha(16)),
         StrokeKind::Inside,
     );
-    board_headers(&l, board, board_pos);
+    board_headers(&l, board);
     board_module(&l, board, w, h);
     board_usb(&l, w, h);
     if view.scale >= 3.0 {
         board_parts(&l, w, h);
     }
 
+    // Boards with a display carry their name above the glass.
+    let (name_at, name_align) = if board.features.display.is_some() {
+        (Pos2::new(rect.center().x, rect.min.y - 4.0), Align2::CENTER_BOTTOM)
+    } else {
+        (Pos2::new(rect.center().x, rect.min.y + view.px(board.height_mm * 0.55)), Align2::CENTER_CENTER)
+    };
     painter.text(
-        Pos2::new(rect.center().x, rect.min.y + view.px(board.height_mm * 0.55)),
-        Align2::CENTER_CENTER,
+        name_at,
+        name_align,
         &board.name,
         FontId::proportional((view.px(2.2)).clamp(8.0, 16.0)),
         Color32::from_gray(220),
     );
 
-    let font = FontId::monospace((view.px(1.9)).clamp(7.0, 13.0));
     for pin in &board.pins {
-        let pos = view.to_screen(board_pin_world_pos(board, pin, board_pos));
+        let pos = view.to_screen(board_pin_world_pos(board, pin, board_pos, rotation));
         let r = view.px(1.1).clamp(2.5, 7.0);
         let (fill, ring) = match pin.kind {
             PinKind::Gnd => (Color32::from_gray(30), Color32::from_gray(140)),
@@ -223,25 +242,10 @@ pub fn draw_board(
                     );
                 }
         }
-        // Label toward the board interior.
-        let (anchor, dx) = match pin.side {
-            Side::Left => (Align2::LEFT_CENTER, r + 3.0),
-            Side::Right => (Align2::RIGHT_CENTER, -r - 3.0),
-            _ => (Align2::CENTER_TOP, 0.0),
-        };
-        if view.scale > 2.0 {
-            painter.text(
-                pos + Vec2::new(dx, 0.0),
-                anchor,
-                &pin.label,
-                font.clone(),
-                Color32::from_gray(210),
-            );
-        }
     }
 
     // On-board extras: RGB LED, RESET / BOOT buttons.
-    for (kind, world_rect) in board_feature_rects(board, board_pos) {
+    for (kind, world_rect) in board_feature_rects(board, board_pos, rotation) {
         let r = Rect::from_min_max(
             view.to_screen([world_rect.min.x, world_rect.min.y]),
             view.to_screen([world_rect.max.x, world_rect.max.y]),
@@ -279,17 +283,44 @@ pub fn draw_board(
     }
 }
 
+/// Header pin labels, drawn after the display glass so it never hides them.
+pub fn draw_board_pin_labels(painter: &egui::Painter, view: &View, board: &BoardProfile, board_pos: [f32; 2], rotation: u16) {
+    if view.scale <= 2.0 {
+        return;
+    }
+    let font = FontId::monospace((view.px(1.9)).clamp(7.0, 13.0));
+    // Clears both the pin pad and a breadboard solder fillet.
+    let r = view.px(1.1).max(2.5);
+    for pin in &board.pins {
+        let pos = view.to_screen(board_pin_world_pos(board, pin, board_pos, rotation));
+        let inward = match pin.side {
+            Side::Left => [1.0, 0.0],
+            Side::Right => [-1.0, 0.0],
+            Side::Top => [0.0, 1.0],
+            Side::Bottom => [0.0, -1.0],
+        };
+        let [ix, iy] = wirelab_core::geometry::rotate(inward, rotation);
+        let anchor = match (ix.round() as i32, iy.round() as i32) {
+            (1, _) => Align2::LEFT_CENTER,
+            (-1, _) => Align2::RIGHT_CENTER,
+            (_, 1) => Align2::CENTER_TOP,
+            _ => Align2::CENTER_BOTTOM,
+        };
+        let galley = painter.layout_no_wrap(pin.label.clone(), font.clone(), Color32::from_gray(210));
+        let rect = anchor.anchor_size(pos + Vec2::new(ix, iy) * (r + 3.0), galley.size());
+        painter.rect_filled(rect.expand(1.0), CornerRadius::same(2), Color32::from_black_alpha(110));
+        painter.galley(rect.min, galley, Color32::from_gray(210));
+    }
+}
+
 /// Black header strips under each row of board pins.
-fn board_headers(l: &Local, board: &BoardProfile, board_pos: [f32; 2]) {
+fn board_headers(l: &Local, board: &BoardProfile) {
     for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
         let mut pts: Vec<[f32; 2]> = board
             .pins
             .iter()
             .filter(|p| p.side == side)
-            .map(|p| {
-                let q = board_pin_world_pos(board, p, board_pos);
-                [q[0] - board_pos[0], q[1] - board_pos[1]]
-            })
+            .map(|p| wirelab_core::geometry::board_pin_local(board, p))
             .collect();
         if pts.is_empty() {
             continue;
@@ -462,6 +493,11 @@ pub fn draw_component(
         Some(VisualState::LedBrightness(b)) => b > 0.01,
         Some(VisualState::RelayClosed(c)) => c,
         Some(VisualState::BuzzerOn { .. }) => true,
+        Some(VisualState::Capacitor { volts, .. }) => volts.abs() > 36.0,
+        Some(VisualState::Boost { mode, .. }) => mode != BoostMode::Off,
+        Some(VisualState::Supply { amps, .. }) => amps > 0.01,
+        Some(VisualState::Diode { conducting, .. }) => conducting,
+        Some(VisualState::Arc { amps, since_pulse_s, .. }) => amps > 0.5 || since_pulse_s < 0.3,
         _ => false,
     } || matches!(
         comp.state,
@@ -487,13 +523,14 @@ pub fn draw_component(
         return;
     }
 
-    let part = Part {
-        l: Local::new(painter, view, comp.pos, comp.rotation),
-        w,
-        h,
-        base,
-        pads: wirelab_core::geometry::terminal_offsets(def),
+    let pads = wirelab_core::geometry::instance_offsets(comp, def);
+    // Bent two-lead parts draw their leads to the chosen span.
+    let w = if comp.props.contains_key(wirelab_core::geometry::SPAN_PROP) && pads.len() == 2 {
+        (pads[1][0] - pads[0][0]).abs().max(w.min(h))
+    } else {
+        w
     };
+    let part = Part { l: Local::new(painter, view, comp.pos, comp.rotation), w, h, base, pads };
     let toggled = matches!(comp.state, CompState::Toggle { on: true });
     let pressed = matches!(comp.state, CompState::Button { pressed: true });
     let level = match comp.state {
@@ -545,6 +582,39 @@ pub fn draw_component(
         Art::AnalogSensor => analog_sensor(&part, level),
         Art::Chip => chip(&part),
         Art::Module => module(&part, toggled),
+        Art::Capacitor => {
+            let (volts, rated) = match vis {
+                Some(VisualState::Capacitor { volts, rated }) => (volts, rated),
+                _ => (0.0, match def.sim {
+                    SimModel::Capacitor { v_rated, .. } => v_rated,
+                    _ => 1.0,
+                }),
+            };
+            capacitor(&part, volts, rated, time);
+        }
+        Art::Diode => diode(&part, matches!(vis, Some(VisualState::Diode { conducting: true, .. }))),
+        Art::Supply => {
+            let (v, a) = match vis {
+                Some(VisualState::Supply { volts, amps }) => (Some(volts), amps),
+                _ => (None, 0.0),
+            };
+            supply(&part, v, a);
+        }
+        Art::Boost => {
+            let st = match vis {
+                Some(VisualState::Boost { mode, volts, amps }) => Some((mode, volts, amps)),
+                _ => None,
+            };
+            boost(&part, st, time);
+        }
+        Art::Pen => {
+            let st = match vis {
+                Some(VisualState::Arc { amps, pulse, since_pulse_s }) => Some((amps, pulse, since_pulse_s)),
+                _ => None,
+            };
+            pen(&part, pressed, st, time);
+        }
+        Art::Clamp => clamp(&part),
     }
     outlines(painter, body, selected, accent, active.filter(|_| on));
 
@@ -567,7 +637,9 @@ pub fn draw_component(
         if on_top {
             name_y = name_y.min(p.y - r - 4.0);
         }
-        if view.scale > 2.2 {
+        // Non-polar leads of through-hole parts need no label.
+        let unlabelled = !def.leads.is_empty() && matches!(t.role, TerminalRole::A | TerminalRole::B);
+        if view.scale > 2.2 && !unlabelled {
             let gap = r + view.px(0.5).clamp(2.0, 6.0);
             let anchor = if out.x > 0.5 {
                 Align2::LEFT_CENTER
@@ -649,10 +721,22 @@ enum Art {
     AnalogSensor,
     Chip,
     Module,
+    Capacitor,
+    Diode,
+    Supply,
+    Boost,
+    Pen,
+    Clamp,
 }
 
 /// Id keywords that pick the art before the drawn shape does (same table as the palette icons).
-const ART_BY_ID: [(&str, Art); 16] = [
+const ART_BY_ID: [(&str, Art); 22] = [
+    ("capacitor", Art::Capacitor),
+    ("diode", Art::Diode),
+    ("dc-supply", Art::Supply),
+    ("hv-boost", Art::Boost),
+    ("weld-pen", Art::Pen),
+    ("weld-clamp", Art::Clamp),
     ("dht", Art::Dht),
     ("hc-sr04", Art::Ultrasonic),
     ("ultrasonic", Art::Ultrasonic),
@@ -1617,6 +1701,200 @@ fn chip(p: &Part) {
 }
 
 /// Generic sensor module: PCB, headers on every pad, an IC and a status LED.
+/// Photoflash electrolytic can: sleeve, polarity stripe, charge level and a volts readout.
+fn capacitor(p: &Part, volts: f32, rated: f32, time: f64) {
+    let l = &p.l;
+    let (w, h) = (p.w, p.h);
+    let (ex, ey) = (w * 0.5 - 1.6, h * 0.5 - 0.2);
+    // Each lead runs from the nearer end of the can to its pad.
+    for pad in &p.pads {
+        let x = if pad[0] < 0.0 { -ex } else { ex };
+        l.lead([x, pad[1].clamp(-ey * 0.8, ey * 0.8)], *pad, 0.6);
+    }
+    let radial = p.pads.len() == 2 && (p.pads[0][0] < 0.0) == (p.pads[1][0] < 0.0);
+    let body = [-ex, -ey, ex, ey];
+    let frac = (volts / rated.max(1.0)).clamp(0.0, 1.2);
+    let charged = col(255, 170, 40);
+    if frac > 0.1 {
+        l.glow([0.0, 0.0], ey * 2.2, charged, 0.3 * frac.min(1.0));
+    }
+    l.shadow(body, 1.4, 1.0);
+    l.shaded(body, 1.4, col(64, 68, 80), col(20, 22, 28));
+    // Charge level rises from the - end toward +.
+    let over = frac > 1.0;
+    let level = if over {
+        if (time * 6.0).sin() > 0.0 { col(255, 40, 40) } else { col(120, 0, 0) }
+    } else {
+        mix(col(40, 150, 90), charged, frac.min(1.0))
+    };
+    if frac > 0.004 {
+        let top = ex - 0.6 - (2.0 * ex - 1.2) * frac.min(1.0);
+        l.fill([top, -ey + 0.6, ex - 0.6, ey - 0.6], 1.0, level.gamma_multiply(0.75));
+    }
+    // Negative stripe on the side of the - lead, + mark at the other end.
+    let stripe = col(160, 168, 186).gamma_multiply(0.9);
+    if radial {
+        let below = p.pads[1][1] >= p.pads[0][1];
+        let (y0, y1) = if below { (ey - 2.6, ey - 1.0) } else { (-ey + 1.0, -ey + 2.6) };
+        l.fill([-ex, y0, ex, y1], 0.0, stripe);
+        for k in [-0.55f32, 0.0, 0.55] {
+            l.fill(bx([k * ex, (y0 + y1) * 0.5], 1.2, 0.35), 0.0, col(40, 42, 48));
+        }
+    } else {
+        l.fill([ex - 2.6, -ey, ex - 1.0, ey], 0.0, stripe);
+        for k in [-0.55f32, 0.0, 0.55] {
+            l.fill(bx([ex - 1.8, k * ey], 0.35, 1.2), 0.0, col(40, 42, 48));
+        }
+    }
+    l.text([-ex, -ey, -ex + 3.0, -ey + 3.0], "+", 2.2, col(255, 220, 150));
+    l.frame(body, 1.4, 1.0, Color32::from_white_alpha(36));
+    let label = if volts.abs() >= 10.0 { format!("{volts:.0}V") } else { format!("{volts:.1}V") };
+    l.text(body, &label, 3.4, if over { col(255, 120, 120) } else { Color32::WHITE });
+}
+
+/// Glass signal diode with its cathode band; glows faintly while conducting.
+fn diode(p: &Part, conducting: bool) {
+    let l = &p.l;
+    let (w, h) = (p.w, p.h);
+    let half = w * 0.25;
+    l.lead([-w * 0.5, 0.0], [-half, 0.0], 0.45);
+    l.lead([w * 0.5, 0.0], [half, 0.0], 0.45);
+    let body = [-half, -h * 0.42, half, h * 0.42];
+    if conducting {
+        l.glow([0.0, 0.0], h * 1.6, col(255, 120, 60), 0.6);
+    }
+    l.shaded(body, h * 0.4, col(240, 150, 80), col(180, 80, 30));
+    l.fill([half - 1.0, body[1], half - 0.45, body[3]], 0.0, col(20, 20, 20));
+    l.frame(body, h * 0.4, 1.0, Color32::from_white_alpha(70));
+}
+
+/// Wall brick with output readout.
+fn supply(p: &Part, volts: Option<f32>, amps: f32) {
+    let l = &p.l;
+    let (w, h) = (p.w, p.h);
+    let b = [-w * 0.5 + 0.6, -h * 0.5 + 0.6, w * 0.5 - 0.6, h * 0.5 - 0.6];
+    l.shadow(b, 2.0, 1.2);
+    l.shaded(b, 2.0, col(58, 58, 64), col(18, 18, 22));
+    for i in 0..5 {
+        let x = b[0] + 4.0 + i as f32 * 1.6;
+        l.fill([x, b[1] + 3.0, x + 0.7, b[3] - 3.0], 0.3, col(10, 10, 12));
+    }
+    l.frame(b, 2.0, 1.0, Color32::from_white_alpha(28));
+    let lit = if volts.is_some_and(|v| v > 1.0) { 1.0 } else { 0.0 };
+    status_led(l, [b[2] - 3.0, b[1] + 3.0], col(80, 230, 110), lit);
+    l.text([b[0] + 13.0, b[1] + 2.0, b[2] - 6.0, b[1] + 8.0], "12V DC", 3.0, col(225, 225, 230));
+    l.text([b[0] + 13.0, b[1] + 8.0, b[2] - 6.0, b[1] + 12.0], "FLOATING", 1.8, col(160, 160, 170));
+    if let Some(v) = volts {
+        l.text([b[0] + 10.0, b[3] - 7.0, b[2] - 4.0, b[3] - 2.5], &format!("{v:.1} V  {amps:.2} A"), 2.2, col(140, 230, 170));
+    }
+}
+
+/// ZVS capacitor-charger board: toroid, heatsink, trimpot, terminal blocks and a mode readout.
+fn boost(p: &Part, st: Option<(BoostMode, f32, f32)>, time: f64) {
+    let l = &p.l;
+    let (w, h) = (p.w, p.h);
+    let (px, py) = (w * 0.5 - 0.4, h * 0.5 - 0.4);
+    pcb(l, [-px, -py, px, py], 1.0, p.base);
+    for c in [[-px + 1.8, -py + 1.8], [px - 1.8, -py + 1.8], [-px + 1.8, py - 1.8], [px - 1.8, py - 1.8]] {
+        hole(l, c, 0.9);
+    }
+    for &q in &p.pads {
+        let edge = if q[0] < 0.0 { -px + 6.0 } else { px };
+        screw_terminal(l, q[1], edge);
+    }
+    let mode = st.map(|s| s.0).unwrap_or(BoostMode::Off);
+    let active = !matches!(mode, BoostMode::Off);
+    // Toroid transformer.
+    let t = [-3.0, -1.0];
+    if active && !matches!(mode, BoostMode::Regulating) {
+        let flicker = 0.5 + 0.2 * ((time * 31.0).sin() as f32);
+        l.glow(t, 9.0, col(255, 180, 60), flicker * 0.5);
+    }
+    l.disc_shadow(t, 7.0, 1.0);
+    l.dome(t, 7.0, col(200, 120, 70), col(160, 80, 40), col(96, 46, 20));
+    l.disc(t, 2.6, shade(p.base, 0.6));
+    for k in 0..18 {
+        let a = k as f32 / 18.0 * TAU;
+        l.seg([t[0] + 2.8 * a.cos(), t[1] + 2.8 * a.sin()], [t[0] + 6.8 * a.cos(), t[1] + 6.8 * a.sin()], 1.0, col(214, 140, 80));
+    }
+    // Heatsink.
+    let hs = [6.0, -py + 3.0, 12.0, py - 8.0];
+    l.shaded(hs, 0.3, col(170, 176, 186), col(110, 116, 126));
+    for i in 0..4 {
+        let y = hs[1] + 1.0 + i as f32 * (hs[3] - hs[1] - 2.0) / 3.0;
+        l.seg([hs[0], y], [hs[2], y], 1.0, col(90, 94, 104));
+    }
+    trim_pot(l, [-11.0, py - 4.0], 2.8);
+    let (color, label) = match st {
+        Some((BoostMode::ConstantCurrent, _, a)) => (col(255, 170, 40), format!("CC {:.0} mA", a * 1000.0)),
+        Some((BoostMode::ConstantPower, v, a)) => (col(255, 140, 40), format!("CP {:.0} W", v * a)),
+        Some((BoostMode::Regulating, v, _)) => (col(80, 230, 110), format!("REG {v:.0} V")),
+        _ => (col(120, 120, 130), "OFF".to_string()),
+    };
+    status_led(l, [-px + 9.0, -py + 3.0], color, if active { 1.0 } else { 0.0 });
+    l.text([-px + 7.0, py - 6.5, px - 7.0, py - 1.5], &label, 2.8, color);
+}
+
+/// Pin vise with tungsten electrode; flashes when a pulse fires and prints the last pulse.
+fn pen(p: &Part, touching: bool, st: Option<(f32, Option<ArcPulse>, f32)>, time: f64) {
+    let l = &p.l;
+    let (w, h) = (p.w, p.h);
+    let x0 = -w * 0.5;
+    let grip = [x0 + 3.0, -h * 0.42, x0 + w * 0.58, h * 0.42];
+    l.lead([x0, 0.0], [grip[0], 0.0], 0.9);
+    l.shadow(grip, h * 0.4, 1.0);
+    l.shaded(grip, h * 0.4, col(70, 30, 30), col(30, 10, 10));
+    for i in 0..10 {
+        let x = grip[0] + 2.0 + i as f32 * (grip[2] - grip[0] - 4.0) / 9.0;
+        l.seg([x, grip[1] + 0.6], [x, grip[3] - 0.6], 1.0, Color32::from_black_alpha(80));
+    }
+    let collet = [grip[2], -h * 0.26, grip[2] + 6.0, h * 0.26];
+    l.shaded(collet, 0.8, CHROME_HI, CHROME_LO);
+    let reach = if touching { 0.6 } else { 0.0 };
+    let tip = [w * 0.5 - 0.2 + reach, 0.0];
+    l.seg([collet[2], 0.0], tip, l.px(0.55).max(1.5), col(150, 150, 160));
+    l.text([grip[0] + 1.0, grip[1], grip[2] - 1.0, grip[3]], "INSULATED", 1.6, Color32::from_white_alpha(110));
+    let Some((amps, pulse, since)) = st else { return };
+    let flash = if amps > 0.5 { 1.0 } else { (1.0 - since / 0.35).clamp(0.0, 1.0) };
+    if flash > 0.0 {
+        let joules = pulse.map(|p| p.joules).unwrap_or(1.0);
+        let r = 4.0 + joules.sqrt() * 4.0;
+        l.glow(tip, r * 2.2, col(120, 170, 255), 0.9 * flash);
+        l.glow(tip, r, Color32::WHITE, flash);
+        for k in 0..7 {
+            let a = k as f32 / 7.0 * TAU + (time * 13.0) as f32;
+            let len = r * (0.6 + 0.4 * ((time * 37.0 + k as f64).sin() as f32).abs());
+            l.seg(tip, [tip[0] + len * a.cos(), tip[1] + len * a.sin()], 1.5, col(200, 220, 255).gamma_multiply(flash));
+        }
+    }
+    if let Some(p) = pulse
+        && since < 6.0
+    {
+        let alpha = (1.0 - (since - 3.0).max(0.0) / 3.0).clamp(0.0, 1.0);
+        let txt = format!("{:.0} A  {:.2} J  {:.0} us", p.peak_a, p.joules, p.width_us);
+        l.text([x0, h * 0.5 + 0.5, w * 0.5, h * 0.5 + 4.0], &txt, 2.4, col(160, 200, 255).gamma_multiply(alpha));
+    }
+}
+
+/// Steel alligator clip; the jaw end bites the work.
+fn clamp(p: &Part) {
+    let l = &p.l;
+    let (w, h) = (p.w, p.h);
+    let x0 = -w * 0.5;
+    l.lead([x0, 0.0], [x0 + 3.0, 0.0], 0.9);
+    let upper = [[x0 + 3.0, -h * 0.15], [x0 + 12.0, -h * 0.45], [w * 0.5, -h * 0.08], [w * 0.5, 0.0], [x0 + 3.0, 0.0]];
+    let lower = [[x0 + 3.0, 0.0], [w * 0.5, 0.0], [w * 0.5, h * 0.08], [x0 + 12.0, h * 0.45], [x0 + 3.0, h * 0.15]];
+    l.poly_shadow(&upper, 0.8);
+    l.poly_shaded(&upper, CHROME_HI, CHROME_LO);
+    l.poly_shaded(&lower, shade(CHROME_HI, 0.9), shade(CHROME_LO, 0.8));
+    for i in 0..6 {
+        let x = x0 + 16.0 + i as f32 * 1.7;
+        l.seg([x, -0.9], [x + 0.8, 0.0], 1.0, col(80, 84, 92));
+        l.seg([x, 0.9], [x + 0.8, 0.0], 1.0, col(80, 84, 92));
+    }
+    l.disc([x0 + 12.0, 0.0], 1.2, col(90, 94, 100));
+}
+
 fn module(p: &Part, on: bool) {
     let l = &p.l;
     let (w, h) = (p.w, p.h);
@@ -1801,6 +2079,8 @@ struct Local<'a> {
     scale: f32,
     rot: u16,
     feather: f32,
+    /// Offset added to local points before rotation.
+    pre: [f32; 2],
 }
 
 impl<'a> Local<'a> {
@@ -1811,11 +2091,19 @@ impl<'a> Local<'a> {
             scale: view.scale,
             rot,
             feather: 1.0 / painter.pixels_per_point().max(0.5),
+            pre: [0.0, 0.0],
         }
     }
 
+    /// Top-left-origin frame of a `size` board at `pos`, turned `rot` degrees about its centre.
+    fn board(painter: &'a egui::Painter, view: &View, pos: [f32; 2], size: [f32; 2], rot: u16) -> Self {
+        let mut l = Self::new(painter, view, [pos[0] + size[0] / 2.0, pos[1] + size[1] / 2.0], rot);
+        l.pre = [-size[0] / 2.0, -size[1] / 2.0];
+        l
+    }
+
     fn pt(&self, p: [f32; 2]) -> Pos2 {
-        let [x, y] = wirelab_core::geometry::rotate(p, self.rot);
+        let [x, y] = wirelab_core::geometry::rotate([p[0] + self.pre[0], p[1] + self.pre[1]], self.rot);
         Pos2::new(self.origin.x + x * self.scale, self.origin.y + y * self.scale)
     }
 

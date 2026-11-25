@@ -19,6 +19,14 @@ pub enum TerminalRole {
     Vcc,
     Gnd,
     Signal,
+    /// Positive output of a supply or the + lead of a polarized part.
+    Positive,
+    /// Negative output of a supply or the - lead of a polarized part.
+    Negative,
+    InPos,
+    InNeg,
+    OutPos,
+    OutNeg,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +55,25 @@ pub enum SimModel {
     DigitalSensor,
     /// Powered sensor driving `Signal` with a GUI slider voltage.
     AnalogSensor { min_mv: u16, max_mv: u16 },
+    /// Floating DC supply between `Positive` and `Negative`.
+    DcSupply { volts: f32, r_int_ohms: f32, i_max_a: f32 },
+    /// Regulated capacitor charger (`InPos`/`InNeg` -> `OutPos`/`OutNeg`), non-isolated.
+    HvBoost {
+        v_set: f32,
+        i_max_a: f32,
+        p_max_w: f32,
+        vin_min: f32,
+        vin_max: f32,
+        efficiency: f32,
+    },
+    /// Capacitor across `Positive`/`Negative` (polarized) with series ESR.
+    Capacitor { farads: f32, v_rated: f32, esr_ohms: f32 },
+    /// Silicon diode, `Anode` -> `Cathode`, as a forward drop plus on-resistance.
+    Diode { forward_mv: f32, on_ohms: f32 },
+    /// Touch electrode `A` (lead) / `B` (tip): pressed = touching the work.
+    ArcContact { contact_ohms: f32, v_arc: f32 },
+    /// Low-resistance conductor between `A` and `B` (clips, leads).
+    Conductor { ohms: f32 },
     Generic,
 }
 
@@ -122,6 +149,16 @@ pub struct ComponentDef {
     /// Per-instance tweakable properties, e.g. resistance override.
     #[serde(default)]
     pub props: Vec<ParamDef>,
+    /// Schematic/BOM value, e.g. "95 uF 330 V"; derived from the sim model when empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub value: String,
+    /// Ratings line for the BOM, e.g. "1/4 W, 250 V".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rating: String,
+    /// Through-hole lead offsets from the body centre in 0.1" pitches, one
+    /// per terminal; parts with leads seat into breadboard holes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub leads: Vec<[f32; 2]>,
 }
 
 impl ComponentDef {
@@ -152,7 +189,9 @@ pub enum CompState {
 impl CompState {
     pub fn initial(model: &SimModel) -> CompState {
         match model {
-            SimModel::PushButton => CompState::Button { pressed: false },
+            SimModel::PushButton | SimModel::ArcContact { .. } => {
+                CompState::Button { pressed: false }
+            }
             SimModel::ToggleSwitch | SimModel::SlideSwitchSpdt | SimModel::DigitalSensor => {
                 CompState::Toggle { on: false }
             }
@@ -174,6 +213,39 @@ pub enum VisualState {
     ServoAngle(f32),
     RelayClosed(bool),
     BuzzerOn { freq_hz: f32 },
+    /// Capacitor terminal voltage and its rating, volts.
+    Capacitor { volts: f32, rated: f32 },
+    /// Supply output voltage and current.
+    Supply { volts: f32, amps: f32 },
+    /// Charger state: output volts/amps and regulation mode.
+    Boost { mode: BoostMode, volts: f32, amps: f32 },
+    Diode { conducting: bool, amps: f32 },
+    /// Touch electrode: current now, and the last finished pulse.
+    Arc { amps: f32, pulse: Option<ArcPulse>, since_pulse_s: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BoostMode {
+    /// Input below the module's minimum: not switching.
+    Off,
+    /// Current-limited charging.
+    ConstantCurrent,
+    /// Power-limited charging.
+    ConstantPower,
+    /// Regulating at the set voltage.
+    Regulating,
+}
+
+/// One discharge through a touch electrode.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ArcPulse {
+    pub peak_a: f32,
+    /// Energy delivered into the contact, joules.
+    pub joules: f32,
+    /// Time above 10 % of peak current, microseconds.
+    pub width_us: f32,
+    /// Electrode-side terminal was negative (DCEN).
+    pub dcen: bool,
 }
 
 pub type PropMap = BTreeMap<String, f64>;

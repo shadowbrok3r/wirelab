@@ -25,5 +25,6 @@
     },
     { "id": "off", "name": "Stop" }
   ],
-  "events": []
+  "events": [],
+  "leads": [[-1.5, 0], [1.5, 0]]
 }

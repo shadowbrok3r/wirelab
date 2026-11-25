@@ -2035,6 +2035,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edcd27d72f2f071c64249075f42e205ff93c9a4c5f6c6da53e79ed9f9832c285"
 
 [[package]]
+name = "include_dir"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5341,7 +5360,7 @@ dependencies = [
 
 [[package]]
 name = "wirelab-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitflags 2.13.2",
  "log",
@@ -5354,7 +5373,7 @@ dependencies = [
 
 [[package]]
 name = "wirelab-flow-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "egui",
  "egui-snarl",
@@ -5363,7 +5382,7 @@ dependencies = [
 
 [[package]]
 name = "wirelab-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -5379,6 +5398,7 @@ dependencies = [
  "egui_extras",
  "embedded-graphics",
  "env_logger",
+ "include_dir",
  "log",
  "rfd",
  "rhai",
@@ -5399,7 +5419,7 @@ dependencies = [
 
 [[package]]
 name = "wirelab-link"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -5411,7 +5431,7 @@ dependencies = [
 
 [[package]]
 name = "wirelab-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cobs 0.5.1",
  "crc",

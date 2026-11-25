@@ -7,10 +7,10 @@ members = [
     "crates/wirelab-flow-ui",
     "crates/wirelab-gui",
 ]
-exclude = ["firmware/wirelab-fw", "lsp"]
+exclude = ["firmware/wirelab-fw", "lsp", "vendor/rhai-lsp"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -28,9 +28,9 @@ cobs = { version = "0.5.1", default-features = false }
 crc = "3.4.0"
 bitflags = { version = "2.13.2", features = ["serde"] }
 rhai = "1.27.0"
-# Vendored rhai-lsp workspace (lsp/): parser + semantic model for live lints.
-rhai-rowan = { path = "lsp/crates/rhai-rowan" }
-rhai-hir = { path = "lsp/crates/rhai-hir" }
+# Vendored rhai-lsp crates (vendor/rhai-lsp): parser + semantic model for live lints.
+rhai-rowan = { path = "vendor/rhai-lsp/crates/rhai-rowan" }
+rhai-hir = { path = "vendor/rhai-lsp/crates/rhai-hir" }
 url = "2.5.8"
 thiserror = "2.0.21"
 anyhow = "1.0.104"

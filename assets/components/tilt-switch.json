@@ -19,5 +19,6 @@
     { "id": "pressed", "name": "Tilted (closed)" },
     { "id": "released", "name": "Level (open)" },
     { "id": "changed", "name": "Changed" }
-  ]
+  ],
+  "leads": [[-1, 0], [1, 0]]
 }

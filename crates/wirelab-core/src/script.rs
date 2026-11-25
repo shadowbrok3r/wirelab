@@ -234,7 +234,14 @@ pub fn script_template(def: &ComponentDef, own: &str, peers: &[String]) -> Strin
                   // me.dim(30); me.set_angle(90); me.beep(150);\n    me.on();\n}\n\n\
                   // fn on_tick(dt_ms) {\n//     // animate here\n// }\n";
         }
-        SimModel::Resistor { .. } | SimModel::Generic => {
+        SimModel::Resistor { .. }
+        | SimModel::Generic
+        | SimModel::DcSupply { .. }
+        | SimModel::HvBoost { .. }
+        | SimModel::Capacitor { .. }
+        | SimModel::Diode { .. }
+        | SimModel::ArcContact { .. }
+        | SimModel::Conductor { .. } => {
             s += "// A routing dot makes a great board-level controller:\n\
                   fn on_start() {\n    pin(28).input_pullup();   // e.g. watch the BOOT button\n    \
                   log(\"controller ready\");\n}\n\n\

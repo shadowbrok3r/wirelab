@@ -32,6 +32,7 @@ fn mini_board() -> BoardProfile {
         notes: vec![],
         specs: vec![],
         features: Default::default(),
+        header: None,
         pins: vec![
             pin("GND1", PinKind::Gnd, PinCaps::empty(), 0),
             pin("GND2", PinKind::Gnd, PinCaps::empty(), 1),
@@ -73,6 +74,9 @@ fn mini_lib() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "res220".into(),
@@ -85,6 +89,9 @@ fn mini_lib() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "button".into(),
@@ -97,6 +104,9 @@ fn mini_lib() -> Library {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     lib
 }
@@ -554,6 +564,9 @@ fn junction_dot_merges_nets() {
         actions: vec![],
         events: vec![],
         props: vec![],
+        value: String::new(),
+        rating: String::new(),
+        leads: Vec::new(),
     });
     let mut circuit = Circuit::new("test-board");
     let led = place(&mut circuit, "led", "led", &SimModel::Led { forward_mv: 2000 });

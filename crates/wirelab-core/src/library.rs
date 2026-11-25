@@ -4,12 +4,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::board::BoardProfile;
+use crate::breadboard::BreadboardProfile;
 use crate::component::ComponentDef;
 
 #[derive(Debug, Default, Clone)]
 pub struct Library {
     pub boards: BTreeMap<String, BoardProfile>,
     pub components: BTreeMap<String, ComponentDef>,
+    pub breadboards: BTreeMap<String, BreadboardProfile>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -31,6 +33,14 @@ impl Library {
         self.components.get(id)
     }
 
+    pub fn breadboard(&self, id: &str) -> Option<&BreadboardProfile> {
+        self.breadboards.get(id)
+    }
+
+    pub fn add_breadboard(&mut self, p: BreadboardProfile) {
+        self.breadboards.insert(p.id.clone(), p);
+    }
+
     pub fn add_board(&mut self, board: BoardProfile) {
         self.boards.insert(board.id.clone(), board);
     }
@@ -39,7 +49,8 @@ impl Library {
         self.components.insert(def.id.clone(), def);
     }
 
-    /// Load every `*.json` under `boards_dir` and `components_dir`.
+    /// Load every `*.json` under `boards_dir`, `components_dir` and the
+    /// `breadboards` directory beside `boards_dir`.
     pub fn load(boards_dir: &Path, components_dir: &Path) -> Result<Library, LibraryError> {
         let mut lib = Library::default();
         for path in json_files(boards_dir)? {
@@ -61,6 +72,13 @@ impl Library {
                 });
             }
             lib.add_component(def);
+        }
+        for path in json_files(&boards_dir.with_file_name("breadboards"))? {
+            let p: BreadboardProfile = read_json(&path)?;
+            if lib.breadboards.contains_key(&p.id) {
+                return Err(LibraryError::Duplicate { id: p.id, path: path.display().to_string() });
+            }
+            lib.add_breadboard(p);
         }
         Ok(lib)
     }
@@ -149,6 +167,19 @@ pub fn lint_component(c: &crate::component::ComponentDef) -> Vec<String> {
         ],
         SimModel::DigitalSensor | SimModel::AnalogSensor { .. } => {
             &[TerminalRole::Vcc, TerminalRole::Gnd, TerminalRole::Signal]
+        }
+        SimModel::DcSupply { .. } | SimModel::Capacitor { .. } => {
+            &[TerminalRole::Positive, TerminalRole::Negative]
+        }
+        SimModel::HvBoost { .. } => &[
+            TerminalRole::InPos,
+            TerminalRole::InNeg,
+            TerminalRole::OutPos,
+            TerminalRole::OutNeg,
+        ],
+        SimModel::Diode { .. } => &[TerminalRole::Anode, TerminalRole::Cathode],
+        SimModel::ArcContact { .. } | SimModel::Conductor { .. } => {
+            &[TerminalRole::A, TerminalRole::B]
         }
         SimModel::Generic => &[],
     };

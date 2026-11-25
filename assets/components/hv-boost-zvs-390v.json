@@ -1,0 +1,58 @@
+{
+  "id": "hv-boost-zvs-390v",
+  "name": "HV Capacitor Charger 8-32V to 45-390V (ZVS)",
+  "category": "Power",
+  "description": "Single-output high-voltage capacitor-charging boost module (40 W, 0.2 A max out). NON-ISOLATED: VIN- and VOUT- share a node. It regulates continuously to the voltage set on its pot, so the charge must be stopped by opening its input. Its own output capacitors also hold charge.",
+  "value": "45-390 V adj., 40 W",
+  "rating": "VIN 8-32 V; VOUT 45-390 V, 0.2 A max",
+  "terminals": [
+    {
+      "id": "vin_pos",
+      "name": "VIN+",
+      "role": "in_pos"
+    },
+    {
+      "id": "vin_neg",
+      "name": "VIN-",
+      "role": "in_neg"
+    },
+    {
+      "id": "vout_pos",
+      "name": "VOUT+",
+      "role": "out_pos"
+    },
+    {
+      "id": "vout_neg",
+      "name": "VOUT-",
+      "role": "out_neg"
+    }
+  ],
+  "visual": {
+    "shape": "generic",
+    "color": [
+      30,
+      92,
+      60
+    ],
+    "width_mm": 44.0,
+    "height_mm": 30.0
+  },
+  "sim": {
+    "kind": "hv_boost",
+    "v_set": 300.0,
+    "i_max_a": 0.2,
+    "p_max_w": 40.0,
+    "vin_min": 8.0,
+    "vin_max": 32.0,
+    "efficiency": 0.85
+  },
+  "props": [
+    {
+      "key": "v_set",
+      "name": "Pot set point (V)",
+      "min": 45.0,
+      "max": 390.0,
+      "default": 300.0
+    }
+  ]
+}

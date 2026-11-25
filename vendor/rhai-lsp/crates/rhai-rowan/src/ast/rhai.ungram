@@ -1,0 +1,321 @@
+// Some Rhai code, could be a file, a module, etc.
+Rhai =
+  'shebang'?
+  statements:Stmt*
+
+Item =
+  Doc*
+  Expr
+
+Doc =
+  'comment_line_doc' | 'comment_block_doc'
+
+Stmt =
+  ';'
+| Item ';'?
+
+Expr =
+  ExprIdent
+| ExprPath
+| ExprLit
+| ExprLet
+| ExprConst
+| ExprBlock
+| ExprUnary
+| ExprBinary
+| ExprParen
+| ExprArray
+| ExprIndex
+| ExprObject
+| ExprCall
+| ExprClosure
+| ExprIf
+| ExprLoop
+| ExprFor
+| ExprWhile
+| ExprBreak
+| ExprContinue
+| ExprSwitch
+| ExprReturn
+| ExprFn
+| ExprExport
+| ExprImport
+| ExprTry
+| ExprThrow
+
+// Standalone identifiers are also valid expressions.
+ExprIdent =
+  'ident'
+
+ExprPath =
+  Path
+
+
+Path =
+  root:'ident' segments:('::' 'ident')*
+
+LitStrTemplate =
+  ('lit_str'? '${' LitStrTemplateInterpolation '}')* 'lit_str'
+
+LitStrTemplateInterpolation =
+  statements:Stmt*
+
+ExprLit =
+  Lit
+
+Lit =
+  'lit_int'
+| 'lit_float'
+| 'lit_str'
+| 'lit_bool'
+| 'lit_char'
+| LitStrTemplate
+
+ExprLet =
+  'let' 'ident' assignment:('=' Expr)?
+
+ExprConst =
+  'const' 'ident' '=' Expr
+
+ExprBlock =
+  '{'
+    statements:Stmt*
+  '}'
+
+ExprUnary =
+  op:('+' | '-' | '!') Expr
+
+ExprBinary = 
+  lhs:Expr
+  op:(
+    '..' | '..='
+  | '||' | '&&'
+  | '==' | '!=' | '<=' | '>=' | '<' | '>'
+  | '+' | '*' | '**' | '-' | '/' | '%' | '<<' | '>>' | '^' | '|' | '&'
+  | '=' | '+=' | '/=' | '*=' | '**=' | '%=' | '>>=' | '<<=' | '-=' | '|=' | '&=' | '^='
+  | '.' | '?.' | '??'
+  )
+  rhs:Expr
+
+ExprParen =
+  '(' Expr ')'
+
+ExprArray =
+  '['  (Expr (',' Expr)* ','?)? ']'
+
+ExprIndex =
+  base:Expr '?['? '['? index:Expr ']'
+
+ExprObject =
+  '#{' fields:(ObjectField (',' ObjectField)* ','?)? '}'
+
+ObjectField =
+  property:('ident' | 'lit_str') ':' Expr
+
+ExprCall =
+  Expr ArgList
+
+ArgList =
+  '(' args:(Expr (',' Expr)* ','?)? ')'
+
+ExprClosure =
+  ParamList body:Expr
+
+ParamList =
+  '(' (Param (',' Param)* ','?)? ')'
+| '|' (Param (',' Param)* ','?)? '|'
+
+Param =
+  'ident'
+
+ExprIf =
+  'if' Expr then_branch:ExprBlock
+  ('else' else_branch:(ExprIf | ExprBlock))?
+
+ExprLoop =
+  'loop' loop_body:ExprBlock
+
+ExprFor =
+  'for' Pat 'in' iterable:Expr
+  loop_body:ExprBlock
+
+ExprWhile =
+  'while' Expr
+  loop_body:ExprBlock
+
+ExprBreak =
+  'break' Expr?
+
+ExprContinue =
+  'continue'
+
+ExprSwitch =
+  'switch' Expr SwitchArmList
+
+SwitchArmList =
+  '{' arms:(SwitchArm (',' SwitchArm)* ','?)? '}'
+
+SwitchArm =
+  pattern:(Expr | '_') condition:SwitchArmCondition? '=>' __expr:Expr
+
+SwitchArmCondition =
+  'if' Expr
+
+ExprThrow = 
+  'throw' Expr
+
+ExprReturn =
+  'return' Expr?
+
+ExprFn =
+  'private'? 'fn' 'ident' ParamList body:ExprBlock
+
+ExprImport =
+  'import' Expr ('as' 'ident')?
+
+ExprExport =
+  'export' ExportTarget
+
+ExprTry =
+  'try'
+  try_block:ExprBlock
+  'catch'
+  catch_params:ParamList?
+  catch_block:ExprBlock
+
+ExportTarget =
+  ExprLet
+| ExprConst
+| ExportIdent
+
+ExportIdent =
+'ident' alias:('as' 'ident')?
+
+Pat =
+  PatTuple
+| PatIdent
+
+PatTuple =
+  '(' ('ident' (',' 'ident')* ','?)? ')'
+
+PatIdent =
+  'ident'
+
+RhaiDef =
+  DefModuleDecl
+  statements:DefStmt*
+
+DefStmt =
+  ';'
+| DefItem ';'?
+
+DefItem =
+  Doc*
+  Def
+
+// Handled separately so that
+// module declarations are only valid at the beginning
+// of the files.
+DefModuleDecl =
+  Doc*
+  DefModule
+
+Def =
+  DefModuleInline
+| DefImport
+| DefConst
+| DefLet
+| DefFn
+| DefOp
+| DefType
+
+DefModuleInline =
+  'module' 'ident' '{' statements:DefStmt* '}'
+
+DefModule =
+  'module' ( 'ident' | 'lit_str' | 'static' )?
+
+DefImport =
+  'import' Expr ('as' 'ident')?
+
+DefConst =
+  'const' 'ident' (':' ty:Type)?
+
+DefLet =
+  'let' 'ident' (':' ty:Type)?
+
+DefOp =
+  op_token:'ident'
+  (
+    'ident'
+    | op:(
+        '||' | '&&'
+      | '==' | '!=' | '<=' | '>=' | '<' | '>'
+      | '+' | '*' | '**' | '-' | '/' | '%' | '<<' | '>>' | '^' | '|' | '&'
+      | '=' | '+=' | '/=' | '*=' | '**=' | '%=' | '>>=' | '<<=' | '-=' | '|=' | '&=' | '^='
+      | '.'
+    )
+  )
+  TypeList ('->' ret_ty:Type)?
+  precedence:DefOpPrecedence?
+
+DefOpPrecedence =
+  'with'
+  '(' 
+  binding_powers:('lit_int' (',' 'lit_int')* ','?)?
+  ')'
+
+DefType = ty_token:'ident' 'ident' '=' (ty:Type | '...')
+
+DefFn =
+  'fn'
+  __kw_get:'ident'?
+  __name:'ident'
+  TypedParamList
+  ('->' ret_ty:Type)?
+
+Type =
+  TypeIdent
+| TypeLit
+| TypeObject
+| TypeArray
+| TypeTuple
+| TypeUnknown
+
+TypeIdent = 'ident' TypeGenerics?
+
+TypeGenerics =
+  '<'
+  (Type (',' Type)* ','?)?
+  '>'
+
+TypeTuple = 
+  '('
+  (Type (',' Type)* ','?)?
+  ')'
+
+TypeLit = Lit
+
+TypeObject =
+  '#{'
+  (TypeObjectField (',' TypeObjectField)* ','?)?
+  '}'
+
+TypeObjectField =
+  Doc*
+  ('ident' | Lit) ':' ty:Type
+
+TypedParamList =
+  '(' (TypedParam (',' TypedParam)* ','?)? ')'
+
+TypedParam =
+  '...'? 'ident' ':' ty:Type
+
+TypeList = 
+  '(' (fist_ty:Type (',' more_ty:Type)* ','?)? ')'
+
+TypeUnion = ty_left:Type '|' ty_right:Type
+
+TypeUnknown = '?'
+
+TypeArray = '[' fist_ty:Type (',' more_ty:Type)* ','? ']'

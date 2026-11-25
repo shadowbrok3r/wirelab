@@ -10,7 +10,7 @@
   "visual": {
     "shape": "generic",
     "color": [165, 200, 185],
-    "width_mm": 14.0,
+    "width_mm": 15.24,
     "height_mm": 3.0
   },
   "sim": { "kind": "push_button" },
@@ -19,5 +19,6 @@
     { "id": "pressed", "name": "Magnet near (closed)" },
     { "id": "released", "name": "Magnet away (open)" },
     { "id": "changed", "name": "Changed" }
-  ]
+  ],
+  "leads": [[-3, 0], [3, 0]]
 }

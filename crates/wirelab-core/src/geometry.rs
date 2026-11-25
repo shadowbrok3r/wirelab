@@ -16,8 +16,38 @@ pub fn rotate(v: [f32; 2], deg: u16) -> [f32; 2] {
     }
 }
 
-/// Header pin position in world mm; USB end is the bottom of the board.
-pub fn board_pin_world_pos(board: &BoardProfile, pin: &BoardPin, board_pos: [f32; 2]) -> [f32; 2] {
+/// World point of a board-local point for a board turned `rotation` degrees about its centre.
+pub fn board_local_to_world(board: &BoardProfile, board_pos: [f32; 2], rotation: u16, local: [f32; 2]) -> [f32; 2] {
+    let (hw, hh) = (board.width_mm / 2.0, board.height_mm / 2.0);
+    let r = rotate([local[0] - hw, local[1] - hh], rotation);
+    [board_pos[0] + hw + r[0], board_pos[1] + hh + r[1]]
+}
+
+/// World-space `[min, max]` corners of a placed board.
+pub fn board_world_bounds(board: &BoardProfile, board_pos: [f32; 2], rotation: u16) -> [[f32; 2]; 2] {
+    let a = board_local_to_world(board, board_pos, rotation, [0.0, 0.0]);
+    let b = board_local_to_world(board, board_pos, rotation, [board.width_mm, board.height_mm]);
+    [[a[0].min(b[0]), a[1].min(b[1])], [a[0].max(b[0]), a[1].max(b[1])]]
+}
+
+/// Header pin position in world mm for a board at `board_pos` turned `rotation` degrees.
+pub fn board_pin_world_pos(board: &BoardProfile, pin: &BoardPin, board_pos: [f32; 2], rotation: u16) -> [f32; 2] {
+    board_local_to_world(board, board_pos, rotation, board_pin_local(board, pin))
+}
+
+/// Header pin position in unrotated board-local mm, top-left origin; USB end is the bottom.
+pub fn board_pin_local(board: &BoardProfile, pin: &BoardPin) -> [f32; 2] {
+    let board_pos = [0.0f32, 0.0];
+    if let Some(h) = board.header {
+        let along = h.first_pin_mm + pin.index as f32 * h.pitch_mm;
+        let (cx, cy) = (board_pos[0] + board.width_mm / 2.0, board_pos[1] + board.height_mm / 2.0);
+        return match pin.side {
+            Side::Left => [cx - h.row_spacing_mm / 2.0, board_pos[1] + board.height_mm - along],
+            Side::Right => [cx + h.row_spacing_mm / 2.0, board_pos[1] + board.height_mm - along],
+            Side::Top => [board_pos[0] + along, cy - h.row_spacing_mm / 2.0],
+            Side::Bottom => [board_pos[0] + along, cy + h.row_spacing_mm / 2.0],
+        };
+    }
     let count = |side: Side| {
         board.pins.iter().filter(|p| p.side == side).map(|p| p.index).max().unwrap_or(0) + 1
     };
@@ -52,6 +82,10 @@ pub fn board_pin_world_pos(board: &BoardProfile, pin: &BoardPin, board_pos: [f32
 
 /// Local terminal offsets in mm, by terminal index, before rotation.
 pub fn terminal_offsets(def: &ComponentDef) -> Vec<[f32; 2]> {
+    if !def.leads.is_empty() && def.leads.len() == def.terminals.len() {
+        let p = crate::breadboard::PITCH_MM;
+        return def.leads.iter().map(|l| [l[0] * p, l[1] * p]).collect();
+    }
     let w = def.visual.width_mm;
     let h = def.visual.height_mm;
     let n = def.terminals.len();
@@ -77,9 +111,25 @@ pub fn terminal_offsets(def: &ComponentDef) -> Vec<[f32; 2]> {
     }
 }
 
+/// Instance prop: lead span of a two-lead part in pitches, e.g. 2 for a
+/// resistor bent across E12-E14.
+pub const SPAN_PROP: &str = "span";
+
+/// Local terminal offsets for one placed part, honouring its lead span.
+pub fn instance_offsets(comp: &PlacedComponent, def: &ComponentDef) -> Vec<[f32; 2]> {
+    let base = terminal_offsets(def);
+    match comp.props.get(SPAN_PROP) {
+        Some(&span) if def.leads.len() == 2 && span > 0.0 => {
+            let half = span as f32 * crate::breadboard::PITCH_MM / 2.0;
+            vec![[-half, 0.0], [half, 0.0]]
+        }
+        _ => base,
+    }
+}
+
 /// World-space terminal position for a placed component.
 pub fn terminal_world_pos(comp: &PlacedComponent, def: &ComponentDef, index: usize) -> [f32; 2] {
-    let off = terminal_offsets(def).get(index).copied().unwrap_or([0.0, 0.0]);
+    let off = instance_offsets(comp, def).get(index).copied().unwrap_or([0.0, 0.0]);
     let r = rotate(off, comp.rotation);
     [comp.pos[0] + r[0], comp.pos[1] + r[1]]
 }
@@ -229,6 +279,24 @@ pub fn wire_path(a: [f32; 2], b: [f32; 2], route: &Route) -> Vec<[f32; 2]> {
     rounded_polyline(&corners, 9.0)
 }
 
+/// Orthogonal path from `a` through manual `waypoints` to `b`, horizontal leg first between
+/// points that are not aligned, with rounded corners.
+pub fn waypoint_path(a: [f32; 2], waypoints: &[[f32; 2]], b: [f32; 2], radius: f32) -> Vec<[f32; 2]> {
+    let mut corners = vec![a];
+    for &q in waypoints.iter().chain(std::iter::once(&b)) {
+        let p = corners[corners.len() - 1];
+        if (p[0] - q[0]).abs() > 0.01 && (p[1] - q[1]).abs() > 0.01 {
+            corners.push([q[0], p[1]]);
+        }
+        corners.push(q);
+    }
+    corners.dedup_by(|p, q| v_len([p[0] - q[0], p[1] - q[1]]) < 0.5);
+    if corners.len() < 2 {
+        return vec![a, b];
+    }
+    rounded_polyline(&corners, radius)
+}
+
 /// Densify a corner path into a polyline with quarter-round corners.
 fn rounded_polyline(corners: &[[f32; 2]], radius: f32) -> Vec<[f32; 2]> {
     let mut pts = vec![corners[0]];
@@ -269,12 +337,13 @@ pub fn endpoint_exit_dir(
     match ep {
         Endpoint::BoardPin { key } => {
             let Some(pin) = board.pin(key) else { return [0.0, 0.0] };
-            match pin.side {
+            let out = match pin.side {
                 Side::Left => [-1.0, 0.0],
                 Side::Right => [1.0, 0.0],
                 Side::Top => [0.0, -1.0],
                 Side::Bottom => [0.0, 1.0],
-            }
+            };
+            rotate(out, circuit.board_rotation)
         }
         Endpoint::Terminal { comp, terminal } => {
             let Some(c) = circuit.components.get(comp) else { return [0.0, 0.0] };
@@ -284,6 +353,30 @@ pub fn endpoint_exit_dir(
             };
             let t = terminal_world_pos(c, def, idx);
             [t[0] - c.pos[0], t[1] - c.pos[1]]
+        }
+        Endpoint::Hole { .. } => [0.0, 0.0],
+    }
+}
+
+/// World position of any endpoint.
+pub fn endpoint_world_pos(
+    circuit: &Circuit,
+    board: &BoardProfile,
+    lib: &Library,
+    ep: &Endpoint,
+) -> Option<[f32; 2]> {
+    match ep {
+        Endpoint::BoardPin { key } => {
+            Some(board_pin_world_pos(board, board.pin(key)?, circuit.board_pos, circuit.board_rotation))
+        }
+        Endpoint::Terminal { comp, terminal } => {
+            let c = circuit.components.get(comp)?;
+            let def = lib.component(&c.def_id)?;
+            let idx = def.terminals.iter().position(|t| &t.id == terminal)?;
+            Some(terminal_world_pos(c, def, idx))
+        }
+        Endpoint::Hole { bb, hole } => {
+            crate::breadboard::hole_endpoint_world(circuit, lib, *bb, hole)
         }
     }
 }

@@ -72,6 +72,11 @@ pub fn apply_edit(
                     .get(comp)
                     .and_then(|c| lib.component(&c.def_id))
                     .is_some_and(|d| d.terminals.iter().any(|t| &t.id == terminal)),
+                Endpoint::Hole { bb, hole } => circuit
+                    .breadboards
+                    .get(bb)
+                    .and_then(|b| lib.breadboard(&b.profile))
+                    .is_some_and(|p| p.parse_hole(hole).is_some()),
             };
             if !valid(&a) || !valid(&b) {
                 return Err("wire references an endpoint that doesn't exist".into());

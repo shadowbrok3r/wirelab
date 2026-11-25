@@ -10,10 +10,11 @@
   "visual": {
     "shape": "photoresistor",
     "color": [214, 160, 96],
-    "width_mm": 5.0,
+    "width_mm": 5.08,
     "height_mm": 4.0
   },
   "sim": { "kind": "photoresistor", "dark_ohms": 200000, "bright_ohms": 2000 },
   "actions": [],
-  "events": []
+  "events": [],
+  "leads": [[-1, 0], [1, 0]]
 }

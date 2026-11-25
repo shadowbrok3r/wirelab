@@ -1,0 +1,43 @@
+{
+  "id": "weld-clamp-alligator",
+  "name": "Work Clamp (alligator clip)",
+  "category": "Welding",
+  "description": "Alligator clip on the workpiece. LEAD takes the weld lead; JAW is the contact on the work. Steel now (higher resistance), copper later.",
+  "value": "steel alligator clip",
+  "rating": "",
+  "terminals": [
+    {
+      "id": "lead",
+      "name": "Lead",
+      "role": "a"
+    },
+    {
+      "id": "jaw",
+      "name": "Jaw",
+      "role": "b"
+    }
+  ],
+  "visual": {
+    "shape": "generic",
+    "color": [
+      170,
+      170,
+      176
+    ],
+    "width_mm": 30.0,
+    "height_mm": 10.0
+  },
+  "sim": {
+    "kind": "conductor",
+    "ohms": 0.01
+  },
+  "props": [
+    {
+      "key": "ohms",
+      "name": "Clip + jaw contact (ohm, assumed)",
+      "min": 0.0005,
+      "max": 1.0,
+      "default": 0.01
+    }
+  ]
+}

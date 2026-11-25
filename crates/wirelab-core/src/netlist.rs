@@ -99,6 +99,15 @@ impl Netlist {
             push(&mut eps, &mut index, wire.a.clone());
             push(&mut eps, &mut index, wire.b.clone());
         }
+        // Leads and header pins sitting in breadboard holes.
+        let seating = crate::breadboard::seating(circuit, Some(board), lib);
+        let mut seat_pairs: Vec<(usize, usize)> = Vec::new();
+        for seat in &seating.seats {
+            let hole = Endpoint::Hole { bb: seat.bb, hole: seat.hole_name.clone() };
+            let h = push(&mut eps, &mut index, hole);
+            let Some(&e) = index.get(&seat.ep) else { continue };
+            seat_pairs.push((e, h));
+        }
 
         let mut uf = UnionFind::new(eps.len());
 
@@ -122,6 +131,21 @@ impl Netlist {
 
         for wire in circuit.wires.values() {
             uf.union(index[&wire.a], index[&wire.b]);
+        }
+        for (e, h) in seat_pairs {
+            uf.union(e, h);
+        }
+        // Holes on one strip or rail share copper.
+        let mut node_first: HashMap<(crate::circuit::BbId, crate::breadboard::NodeKey), usize> =
+            HashMap::new();
+        for (i, ep) in eps.iter().enumerate() {
+            let Some(node) = crate::breadboard::endpoint_node(circuit, lib, ep) else { continue };
+            match node_first.get(&node) {
+                Some(&first) => uf.union(first, i),
+                None => {
+                    node_first.insert(node, i);
+                }
+            }
         }
 
         // Collapse roots into dense net ids.
@@ -166,6 +190,7 @@ impl Netlist {
                 SimModel::Resistor { .. }
                     | SimModel::Photoresistor { .. }
                     | SimModel::Potentiometer { .. }
+                    | SimModel::Conductor { .. }
             );
             if !bridges {
                 continue;

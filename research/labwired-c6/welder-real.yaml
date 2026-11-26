@@ -1,0 +1,53 @@
+# LabWired - ESP32-C6-DevKitC-1 System Configuration
+#
+# Board wiring per the ESP32-C6-DevKitC-1 v1.2 user guide
+# (docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/esp32-c6-devkitc-1):
+#   - On-board USB-to-UART bridge on U0TXD (GPIO16) / U0RXD (GPIO17) — this is
+#     the board's serial console socket (`debug_uart: uart0`).
+#   - Addressable RGB LED (WS2812) driven by GPIO8. NOTE: this is NOT a plain
+#     LED — a GPIO level does not light it; it needs an RMT/bit-banged WS2812
+#     frame, which L1 does not model. Declared as an honest pin stub.
+#   - BOOT button on GPIO9, active low. Holding it at reset enters download
+#     mode; as a running-system input it is a plain active-low button.
+#   - RESET button is wired to CHIP_EN, not a GPIO — not representable here.
+#
+# SIM-DERIVED / L1 smoke — no silicon diff. See docs/boards/esp32c6-devkitc.md.
+
+name: "esp32c6-devkitc"
+chip: "LABWIRED/configs/chips/esp32c6-thr.yaml"
+cpu_hz: 160_000_000
+debug_uart: "usb_serial_jtag"
+external_devices: []
+board_io:
+  - id: "rgb_led"
+    kind: "led"
+    peripheral: "gpio"
+    pin: 8
+    signal: "output"
+    active_high: true
+  - id: "button_boot"
+    kind: "button"
+    peripheral: "gpio"
+    pin: 9
+    signal: "input"
+    active_high: false
+cosim_models:
+  - id: bank
+    adapter: analog
+    step_ns: 100000
+    inputs:
+      relay: board.gpio.gpio19
+    outputs:
+      tap: adc.apb_saradc.1_volts
+      btn: board.gpio_in.gpio9
+    config:
+      netlist_text: |
+        Vsup sup 0 dc 300
+        Srelay sup bank relay ron=1000 roff=1e12
+        Cbank bank 0 190u
+        Rtop bank tap 300k
+        Rlow tap 0 2k
+        Vbtn btn 0 PULSE(3.3 0 0.6 1m 1m 1.3 10)
+        Rbtn btn 0 1meg
+        .end
+      probes: { tap: 'v(tap)', bank: 'v(bank)', btn: 'v(btn)' }

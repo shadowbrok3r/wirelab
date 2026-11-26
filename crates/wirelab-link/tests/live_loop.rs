@@ -71,6 +71,7 @@ fn library() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "r220".into(),
@@ -86,6 +87,7 @@ fn library() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "button".into(),
@@ -101,6 +103,7 @@ fn library() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib
 }

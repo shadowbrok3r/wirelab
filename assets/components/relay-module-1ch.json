@@ -2,7 +2,7 @@
   "id": "relay-module-1ch",
   "name": "Relay Module (1 Channel)",
   "category": "Output",
-  "description": "Single-channel opto-isolated relay board. Wire VCC to 5V, GND to GND and IN to a GPIO; the switched load connects across COM and NO (or NC).",
+  "description": "Single-channel opto-isolated relay board. Wire VCC to 5V, GND to GND and IN to a GPIO; the switched load connects across COM and NO (or NC). Board 51 x 26 mm, 19 mm tall, with a 3.1 mm mounting hole in each corner; set its H/L jumper to H for a high-level trigger.",
   "value": "1-ch opto relay module, 5 V coil",
   "rating": "contacts 10 A @ 30 VDC",
   "terminals": [
@@ -44,8 +44,8 @@
       90,
       180
     ],
-    "width_mm": 26.0,
-    "height_mm": 34.0
+    "width_mm": 51.0,
+    "height_mm": 26.0
   },
   "sim": {
     "kind": "relay_module"
@@ -64,5 +64,31 @@
       "name": "Toggle"
     }
   ],
-  "events": []
+  "events": [],
+  "pads_mm": [
+    [
+      -25.5,
+      -2.54
+    ],
+    [
+      -25.5,
+      0.0
+    ],
+    [
+      -25.5,
+      2.54
+    ],
+    [
+      25.5,
+      0.0
+    ],
+    [
+      25.5,
+      -5.0
+    ],
+    [
+      25.5,
+      5.0
+    ]
+  ]
 }

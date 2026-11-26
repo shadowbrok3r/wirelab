@@ -86,6 +86,9 @@ pub fn terminal_offsets(def: &ComponentDef) -> Vec<[f32; 2]> {
         let p = crate::breadboard::PITCH_MM;
         return def.leads.iter().map(|l| [l[0] * p, l[1] * p]).collect();
     }
+    if !def.pads_mm.is_empty() && def.pads_mm.len() == def.terminals.len() {
+        return def.pads_mm.clone();
+    }
     let w = def.visual.width_mm;
     let h = def.visual.height_mm;
     let n = def.terminals.len();

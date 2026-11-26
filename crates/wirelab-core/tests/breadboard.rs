@@ -92,8 +92,11 @@ fn welder_leads_sit_in_the_build_holes() {
     let pins = s.seats.iter().filter(|x| matches!(x.ep, Endpoint::BoardPin { .. })).count();
     assert_eq!((leads, pins), (16, 18));
     let board = lib.board(&c.board_id).unwrap();
-    let lints = wirelab_core::validate::validate(&c, board, &lib, &Netlist::build(&c, board, &lib));
+    let nl = Netlist::build(&c, board, &lib);
+    let lints = wirelab_core::validate::validate(&c, board, &lib, &nl);
     assert!(!lints.iter().any(|l| l.message.contains("unwired")), "{:?}", lints.iter().map(|l| &l.message).collect::<Vec<_>>());
+    let (_msgs, bindings) = wirelab_core::engine::plan_setup(&c, board, &lib, &nl);
+    assert!(bindings.warnings.is_empty(), "{:?}", bindings.warnings);
     let esp = BbId(2);
     for x in &s.seats {
         let on_esp = matches!(&x.ep, Endpoint::BoardPin { .. })
@@ -103,25 +106,77 @@ fn welder_leads_sit_in_the_build_holes() {
 }
 
 #[test]
-fn welder_build_charges_and_reads_the_tap() {
-    let lib = lib();
+fn welder_controls_land_in_the_spec_holes() {
     let c = example("22-cd-welder-electrocookie.wirelab.json");
+    let (hv, esp) = (BbId(1), BbId(2));
+    let landing = |lead: &str| -> Vec<(BbId, String)> {
+        c.wires
+            .values()
+            .filter_map(|w| match (label_of(&c, &w.a).as_deref() == Some(lead), &w.a, &w.b) {
+                (true, _, Endpoint::Hole { bb, hole }) => Some((*bb, hole.clone())),
+                (false, Endpoint::Hole { bb, hole }, _) if label_of(&c, &w.b).as_deref() == Some(lead) => {
+                    Some((*bb, hole.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let want = [
+        ("K1.signal", esp, "A11"),
+        ("K1.vcc", esp, "J5"),
+        ("K1.gnd", esp, "I6"),
+        ("K2.signal", esp, "A12"),
+        ("K2.vcc", esp, "I5"),
+        ("K2.gnd", hv, "-A13"),
+        ("K2.common", hv, "+A27"),
+        ("R6.b", hv, "-A27"),
+        ("S2.a", esp, "A10"),
+        ("S2.b", hv, "-A14"),
+        ("R8.a", esp, "J11"),
+    ];
+    for (lead, bb, hole) in want {
+        assert_eq!(landing(lead), vec![(bb, hole.to_string())], "{lead}");
+    }
+    assert_eq!(c.display_rotation, 180, "the picture reads upright with the board USB-up");
+}
+
+#[test]
+fn welder_build_charges_reads_the_tap_and_dumps() {
+    let lib = lib();
+    let mut c = example("22-cd-welder-electrocookie.wirelab.json");
+    let id = |c: &Circuit, label: &str| c.components.values().find(|x| x.label == label).unwrap().id;
+    let s1 = id(&c, "S1");
+    c.components.get_mut(&s1).unwrap().state = wirelab_core::component::CompState::Toggle { on: true };
     let board = lib.board(&c.board_id).unwrap();
     let nl = Netlist::build(&c, board, &lib);
+    // K1 (GPIO19) closed and K2 (GPIO18) energized to hold R6 off the bank.
     let mut bank = PinBank::default();
-    *bank.get_mut(19).unwrap() = PinDrive { mode: PinMode::Output, out_high: true, ..PinDrive::default() };
-    *bank.get_mut(1).unwrap() = PinDrive { mode: PinMode::Analog, ..PinDrive::default() };
+    for gpio in [18, 19] {
+        *bank.get_mut(gpio).unwrap() = PinDrive { mode: PinMode::Output, out_high: true, ..PinDrive::default() };
+    }
+    for gpio in [1, 3] {
+        *bank.get_mut(gpio).unwrap() = PinDrive { mode: PinMode::Analog, ..PinDrive::default() };
+    }
     let mut st = PowerState::default();
     for _ in 0..100 {
         step(&c, board, &lib, &nl, &bank, &mut st, 0.01);
     }
-    let c1 = c.components.values().find(|x| x.label == "C1").unwrap().id;
+    let c1 = id(&c, "C1");
     let v = st.cap_volts(c1).unwrap();
     assert!((v - 300.0).abs() < 1.0, "bank reached {v} V");
     bank.get_mut(19).unwrap().out_high = false;
     let out = step(&c, board, &lib, &nl, &bank, &mut st, 0.001);
     let mv = f64::from(out.analog_mv[&1]);
     assert!((mv - v * 1000.0 * 2.0 / 302.0).abs() < 5.0, "ADC sees {mv} mV at {v} V");
+    let arm = f64::from(out.analog_mv[&3]);
+    assert!((arm - 12_000.0 * 10.0 / 57.0).abs() < 20.0, "ARM sense in J11 reads {arm} mV");
+    // K2 released: R6 between +A27 and -A27 drains the bank under 5 V within a second.
+    bank.get_mut(18).unwrap().out_high = false;
+    for _ in 0..100 {
+        step(&c, board, &lib, &nl, &bank, &mut st, 0.01);
+    }
+    let v = st.cap_volts(c1).unwrap();
+    assert!(v < 5.0, "bank still at {v} V one second after K2 released");
 }
 
 #[test]

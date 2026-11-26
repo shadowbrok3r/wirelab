@@ -96,6 +96,9 @@ pub struct Circuit {
     /// Dev board quarter turn about its centre, in degrees.
     #[serde(default, skip_serializing_if = "is_zero_u16")]
     pub board_rotation: u16,
+    /// On-board display picture turn relative to the board, in degrees: 0, 90, 180 or 270.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub display_rotation: u16,
     pub components: BTreeMap<CompId, PlacedComponent>,
     pub wires: BTreeMap<WireId, Wire>,
     next_comp: u32,
@@ -125,6 +128,7 @@ impl Circuit {
             board_id: board_id.to_string(),
             board_pos: [0.0, 0.0],
             board_rotation: 0,
+            display_rotation: 0,
             components: BTreeMap::new(),
             wires: BTreeMap::new(),
             next_comp: 1,
@@ -214,8 +218,45 @@ impl Circuit {
     pub fn wires_at(&self, ep: &Endpoint) -> impl Iterator<Item = &Wire> {
         self.wires.values().filter(move |w| &w.a == ep || &w.b == ep)
     }
+
+    /// Canvas turn of the on-board display picture: board turn plus picture turn.
+    pub fn screen_rotation(&self) -> u16 {
+        (self.board_rotation % 360 + self.display_rotation % 360) % 360
+    }
 }
 
 fn is_zero_u16(v: &u16) -> bool {
     *v == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINIMAL: &str = r#"{"board_id":"esp32-c6-lcd-147","board_pos":[0.0,0.0],"board_rotation":180,
+        "components":{},"wires":{},"next_comp":1,"next_wire":1}"#;
+
+    #[test]
+    fn display_rotation_defaults_to_zero_and_is_omitted_when_zero() {
+        let mut c: Circuit = serde_json::from_str(MINIMAL).expect("minimal circuit parses");
+        assert_eq!(c.display_rotation, 0);
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(!json.contains("display_rotation"), "{json}");
+        c.display_rotation = 180;
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"display_rotation\":180"), "{json}");
+        let back: Circuit = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.display_rotation, 180);
+    }
+
+    #[test]
+    fn screen_rotation_adds_board_and_display_turns() {
+        let mut c = Circuit::new("esp32-c6-lcd-147");
+        assert_eq!(c.screen_rotation(), 0);
+        for (board, display, screen) in [(180, 180, 0), (180, 0, 180), (90, 180, 270), (270, 180, 90), (270, 270, 180)] {
+            c.board_rotation = board;
+            c.display_rotation = display;
+            assert_eq!(c.screen_rotation(), screen, "board {board} + display {display}");
+        }
+    }
 }

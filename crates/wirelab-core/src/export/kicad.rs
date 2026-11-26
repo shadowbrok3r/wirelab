@@ -511,7 +511,7 @@ fn component_symbol(c: &crate::circuit::PlacedComponent, d: &ComponentDef, lib_i
             if !value.is_empty() && value != d.name {
                 lines.push((value, 1.143, ""));
             }
-            let rating = part_rating(d);
+            let rating = part_rating(c, d);
             if !rating.is_empty() {
                 lines.push((rating, 1.0, "italic"));
             }
@@ -527,6 +527,7 @@ fn ref_prefix(d: &ComponentDef) -> &'static str {
         SimModel::Diode { .. } | SimModel::Led { .. } => "D",
         SimModel::RelayModule => "K",
         SimModel::DcSupply { .. } => "PS",
+        SimModel::PushButton | SimModel::ToggleSwitch | SimModel::SlideSwitchSpdt => "SW",
         _ => "U",
     }
 }
@@ -781,7 +782,7 @@ pub fn schematic(ctx: &DocCtx) -> String {
         let key = if baked == 0 { lib_key(d) } else { format!("{}_{baked}", lib_key(d)) };
         let sym = defs.entry(key.clone()).or_insert_with(|| component_symbol(c, d, &key, baked));
         let value = part_value(c, d);
-        let rating = part_rating(d);
+        let rating = part_rating(c, d);
         let fields: Vec<(&str, String, FieldPos)> = if sym.frame.is_some() {
             let [x0, y0, _, _] = frame_on_sheet(sym, at, rot);
             vec![

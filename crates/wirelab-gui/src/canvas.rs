@@ -639,7 +639,7 @@ impl WireLabApp {
                 let side = glass.width().min(glass.height());
                 let square = egui::Rect::from_center_size(glass.center(), egui::Vec2::splat(side));
                 let texture = self.lcd_texture.texture(ui.ctx(), ops);
-                crate::lcd::paint(&painter, square, rot, texture);
+                crate::lcd::paint(&painter, square, self.project.circuit.screen_rotation(), texture);
             }
         }
         if let Some(board) = self.lib.board(&self.project.circuit.board_id) {
@@ -1406,6 +1406,13 @@ impl WireLabApp {
                     let c = &mut self.project.circuit;
                     c.board_rotation = (c.board_rotation + 90) % 360;
                     self.topo_rev += 1;
+                    ui.close();
+                }
+                let has_display =
+                    self.lib.board(&self.project.circuit.board_id).is_some_and(|b| b.features.display.is_some());
+                if has_display && ui_kit::menu_item(ui, ph::ARROWS_CLOCKWISE, "Rotate display 180°").clicked() {
+                    let c = &mut self.project.circuit;
+                    c.display_rotation = (c.display_rotation + 180) % 360;
                     ui.close();
                 }
                 let _ = controls::submenu(ui, ui_kit::kit(ph::GRID_FOUR), "Add breadboard", |ui| {

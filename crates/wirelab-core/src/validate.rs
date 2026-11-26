@@ -89,18 +89,23 @@ pub fn validate(
         };
         let name = if comp.label.is_empty() { &def.name } else { &comp.label };
 
-        let mut unwired = Vec::new();
-        for t in &def.terminals {
+        let is_wired = |t: &crate::component::TerminalDef| {
             let ep = Endpoint::Terminal { comp: comp.id, terminal: t.id.clone() };
             let own_hole = seats.seat_of(&ep).map(|x| Endpoint::Hole { bb: x.bb, hole: x.hole_name.clone() });
             // A seated lead is wired when its strip or rail reaches anything else.
             let via_board = nl
                 .net_of(&ep)
                 .is_some_and(|n| nl.nets[n].endpoints.iter().any(|e| e != &ep && Some(e) != own_hole.as_ref()));
-            let wired = circuit.wires_at(&ep).next().is_some() || via_board;
-            // A relay's spare contact is normally left open.
-            let spare = t.role == crate::component::TerminalRole::NormallyClosed;
-            if !wired && !spare {
+            circuit.wires_at(&ep).next().is_some() || via_board
+        };
+        let throw = |t: &crate::component::TerminalDef| {
+            matches!(t.role, TerminalRole::NormallyOpen | TerminalRole::NormallyClosed)
+        };
+        let mut unwired = Vec::new();
+        for t in &def.terminals {
+            // A relay's unused throw is left open when the other throw is wired.
+            let spare = throw(t) && def.terminals.iter().any(|o| o.id != t.id && throw(o) && is_wired(o));
+            if !is_wired(t) && !spare {
                 unwired.push(t.name.clone());
             }
         }

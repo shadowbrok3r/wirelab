@@ -736,11 +736,9 @@ mod tests {
         );
     }
 
-    /// Example 21 end to end on the simulator: the firmware charges the 190 uF bank through the
-    /// relay and charger, opens the relay near its set point, sees a weld collapse the bank,
-    /// holds off, recharges, and latches the 310 V cutoff.
+    /// Example 21 on the simulator: boot latch, arm, charge, weld and hold-off, DUMP drain and latch, 310 V cutoff.
     #[test]
-    fn cd_welder_charges_holds_and_cuts_off() {
+    fn cd_welder_arms_charges_dumps_and_cuts_off() {
         use wirelab_core::component::VisualState;
         let lib = test_lib();
         let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
@@ -749,9 +747,11 @@ mod tests {
         )
         .expect("example loads");
         let mut c = project.circuit.clone();
-        let (mut live, netlist, bindings) = live_for(&lib, &c);
         let id = |c: &Circuit, label: &str| *c.components.values().find(|x| x.label == label).map(|x| &x.id).unwrap();
-        let (c1, k1, pen) = (id(&c, "C1"), id(&c, "K1"), id(&c, "PEN"));
+        let (c1, k1, k2, pen) = (id(&c, "C1"), id(&c, "K1"), id(&c, "K2"), id(&c, "PEN"));
+        let (s1, s2) = (id(&c, "S1"), id(&c, "S2"));
+        c.components.get_mut(&s1).unwrap().state = CompState::Toggle { on: true };
+        let (mut live, netlist, bindings) = live_for(&lib, &c);
         let mut state_rev = 1;
         let mut log = Vec::new();
         let run = |live: &mut LiveState, c: &Circuit, state_rev: u64, ms: u64, log: &mut Vec<String>| {
@@ -766,13 +766,25 @@ mod tests {
             Some(VisualState::Capacitor { volts, .. }) => volts,
             other => panic!("no capacitor reading: {other:?}"),
         };
+        let count = |log: &[String], text: &str| log.iter().filter(|l| l.contains(text)).count();
 
+        // ARM already on at boot: the boot latch holds it disarmed until the switch reads OFF.
+        run(&mut live, &c, state_rev, 1300, &mut log);
+        assert_eq!(count(&log, "-> ARMING"), 0, "armed with ARM on at boot: {log:?}");
+        c.components.get_mut(&s1).unwrap().state = CompState::Toggle { on: false };
+        state_rev += 1;
+        run(&mut live, &c, state_rev, 100, &mut log);
+        c.components.get_mut(&s1).unwrap().state = CompState::Toggle { on: true };
+        state_rev += 1;
         run(&mut live, &c, state_rev, 2600, &mut log);
-        assert!(log.iter().any(|l| l.contains("SAFE -> CHARGE")), "{log:?}");
-        assert!(log.iter().any(|l| l.contains("CHARGE -> READY")), "{log:?}");
+        for step in ["SAFE -> ARMING", "ARMING -> CHARGE"] {
+            assert_eq!(count(&log, step), 1, "{step}: {log:?}");
+        }
+        assert!(count(&log, "CHARGE -> READY") >= 1, "{log:?}");
         let v = bank(&live);
         assert!((228.0..=252.0).contains(&v), "bank settles near the 240 V set point, got {v}");
         assert_eq!(vis(&live, k1), Some(VisualState::RelayClosed(false)), "K1 open while READY");
+        assert_eq!(vis(&live, k2), Some(VisualState::RelayClosed(true)), "K2 holds the dump open");
 
         // Touch the work: the bank dumps through the pen and the firmware holds K1 open.
         c.components.get_mut(&pen).unwrap().state = CompState::Button { pressed: true };
@@ -792,7 +804,30 @@ mod tests {
         assert!(log.iter().any(|l| l.contains("HOLD -> CHARGE")), "{log:?}");
         assert!(bank(&live) > 220.0, "recharged after the hold-off, got {}", bank(&live));
 
-        // A bank above 310 V (e.g. a welded relay) trips the latched cutoff.
+        // DUMP: K1 opens, K2 releases, R6 drains the bank, and the latch keeps it SAFE with ARM on.
+        c.components.get_mut(&s2).unwrap().state = CompState::Button { pressed: true };
+        state_rev += 1;
+        run(&mut live, &c, state_rev, 150, &mut log);
+        c.components.get_mut(&s2).unwrap().state = CompState::Button { pressed: false };
+        state_rev += 1;
+        run(&mut live, &c, state_rev, 1400, &mut log);
+        assert!(count(&log, "DUMP pressed") == 1 && count(&log, "DUMPING -> SAFE") == 1, "{log:?}");
+        assert!(bank(&live) < 5.0, "bank drained through R6, got {}", bank(&live));
+        assert_eq!(vis(&live, k2), Some(VisualState::RelayClosed(false)), "K2 released");
+        assert_eq!(count(&log, "SAFE -> ARMING"), 1, "latched: {log:?}");
+
+        // Cycling ARM re-arms and recharges.
+        c.components.get_mut(&s1).unwrap().state = CompState::Toggle { on: false };
+        state_rev += 1;
+        run(&mut live, &c, state_rev, 150, &mut log);
+        let ready_before = count(&log, "CHARGE -> READY");
+        c.components.get_mut(&s1).unwrap().state = CompState::Toggle { on: true };
+        state_rev += 1;
+        run(&mut live, &c, state_rev, 1200, &mut log);
+        assert_eq!(count(&log, "ARMING -> CHARGE"), 2, "{log:?}");
+        assert!(count(&log, "CHARGE -> READY") > ready_before, "{log:?}");
+
+        // A bank above 310 V (e.g. a welded relay) trips the latched cutoff and releases K2.
         if let Some(session) = live.session.as_mut()
             && let Some(dev) = session.device.as_any_mut().downcast_mut::<SimDevice>()
         {
@@ -803,6 +838,6 @@ mod tests {
         run(&mut live, &c, state_rev, 300, &mut log);
         assert!(log.iter().any(|l| l.contains("FAULT: OVER 310 V")), "{log:?}");
         assert_eq!(vis(&live, k1), Some(VisualState::RelayClosed(false)));
+        assert_eq!(vis(&live, k2), Some(VisualState::RelayClosed(false)));
     }
-
 }

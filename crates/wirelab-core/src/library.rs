@@ -145,6 +145,9 @@ pub fn lint_component(c: &crate::component::ComponentDef) -> Vec<String> {
             problems.push(format!("duplicate action id {}", a.id));
         }
     }
+    if !c.pads_mm.is_empty() && c.pads_mm.len() != c.terminals.len() {
+        problems.push(format!("pads_mm has {} entries for {} terminals", c.pads_mm.len(), c.terminals.len()));
+    }
     let need: &[TerminalRole] = match &c.sim {
         SimModel::Led { .. } => &[TerminalRole::Anode, TerminalRole::Cathode],
         SimModel::Resistor { .. } | SimModel::Photoresistor { .. } => {

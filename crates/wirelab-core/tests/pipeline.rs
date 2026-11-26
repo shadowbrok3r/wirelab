@@ -77,6 +77,7 @@ fn mini_lib() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "res220".into(),
@@ -97,6 +98,7 @@ fn mini_lib() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "button".into(),
@@ -117,6 +119,7 @@ fn mini_lib() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "pot".into(),
@@ -141,6 +144,7 @@ fn mini_lib() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib
 }

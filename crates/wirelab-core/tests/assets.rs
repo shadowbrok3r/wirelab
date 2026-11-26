@@ -30,6 +30,24 @@ fn all_assets_load_and_lint_clean() {
     assert!(problems.is_empty(), "asset problems:\n{}", problems.join("\n"));
 }
 
+/// The relay module matches the 51 x 26 mm board: header on one short edge, screw terminal on the other.
+#[test]
+fn relay_module_has_the_real_outline_and_fixed_pads() {
+    let assets = assets_dir();
+    let lib = Library::load(&assets.join("boards"), &assets.join("components")).expect("assets parse");
+    let d = lib.component("relay-module-1ch").expect("relay module");
+    assert_eq!((d.visual.width_mm, d.visual.height_mm), (51.0, 26.0));
+    assert!(d.leads.is_empty(), "module pads must not seat into breadboard holes");
+    let pads = wirelab_core::geometry::terminal_offsets(d);
+    let at = |id: &str| pads[d.terminals.iter().position(|t| t.id == id).expect(id)];
+    for (id, y) in [("vcc", -2.54), ("gnd", 0.0), ("signal", 2.54)] {
+        assert_eq!(at(id), [-25.5, y], "{id} on the header edge");
+    }
+    for (id, y) in [("normally_open", -5.0), ("common", 0.0), ("normally_closed", 5.0)] {
+        assert_eq!(at(id), [25.5, y], "{id} on the screw terminal edge");
+    }
+}
+
 /// Shipped examples must parse, reference known assets, lint clean and
 /// their scripts must compile; the PWM example must actually emit PWM.
 #[test]

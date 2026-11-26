@@ -159,6 +159,9 @@ pub struct ComponentDef {
     /// per terminal; parts with leads seat into breadboard holes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub leads: Vec<[f32; 2]>,
+    /// Fixed pad offsets from the body centre in mm, one per terminal; they do not seat into breadboard holes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pads_mm: Vec<[f32; 2]>,
 }
 
 impl ComponentDef {

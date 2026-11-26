@@ -1238,19 +1238,24 @@ fn servo(p: &Part, angle: f32) -> f32 {
     (l.pt(tip).y - l.px(r1)).min(l.pt(hub).y - l.px(2.0))
 }
 
-/// 1-channel relay module: blue PCB, relay cube with its contact diagram, screw terminals, status LED.
+/// 1-channel relay module: blue PCB, 3.1 mm corner holes, relay cube with its contact diagram, screw terminals, opto, H/L jumper, status LED.
 fn relay(p: &Part, closed: bool) {
     let l = &p.l;
     let (w, h) = (p.w, p.h);
     let (px, py) = (w * 0.5 - 0.4, h * 0.5 - 0.4);
     pcb(l, [-px, -py, px, py], 1.0, p.base);
-    hole(l, [-px + 2.4, -py + 1.8], 0.85);
-    hole(l, [-px + 2.4, py - 1.8], 0.85);
+    // 3.1 mm holes centred 3 mm in from each edge.
+    for (sx, sy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let at = [sx * (w * 0.5 - 3.0), sy * (h * 0.5 - 3.0)];
+        l.disc(at, 2.0, PLATING);
+        l.disc(at, 1.55, HOLE);
+    }
     p.headers(|q| q[0] < 0.0);
     for &q in p.pads.iter().filter(|q| q[0] > 0.0) {
         screw_terminal(l, q[1], px);
     }
-    let cube = [-px + 3.6, -py + 4.8, px - 7.0, py - 8.4];
+    // 19 x 15.5 mm SRD cube beside the screw terminal.
+    let cube = [(px - 26.0).max(-px + 8.0), (-7.75f32).max(-py + 2.0), px - 7.0, 7.75f32.min(py - 2.0)];
     l.shadow(cube, 0.6, 1.2);
     l.shaded(cube, 0.6, col(64, 136, 240), col(26, 82, 184));
     l.frame(cube, 0.6, 1.0, Color32::from_white_alpha(46));
@@ -1262,19 +1267,28 @@ fn relay(p: &Part, closed: bool) {
     if p.detail() >= 3.0 {
         relay_symbol(l, [cx, cube[3] - 6.2], closed);
     }
-    let row = py - 3.4;
-    status_led(l, [-px + 4.8, row], col(70, 230, 110), if closed { 1.0 } else { 0.0 });
-    ic(l, [-px + 9.2, row], 1.5, 1.2, 0);
+    // Optocoupler, driver transistor, status LED, flyback diode and resistor.
+    let (top, low) = (-(py - 6.6).max(2.0), (py - 6.6).max(2.0));
+    ic(l, [-px + 12.0, top], 4.4, 2.8, 2);
+    ic(l, [-px + 18.5, top], 1.5, 1.2, 0);
     if p.detail() >= 4.0 {
         for k in [-0.5f32, 0.5] {
-            l.fill(bx([-px + 9.2 + k, row + 0.85], 0.3, 0.5), 0.0, TIN);
+            l.fill(bx([-px + 18.5 + k, top + 0.85], 0.3, 0.5), 0.0, TIN);
         }
-        l.fill(bx([-px + 9.2, row - 0.85], 0.3, 0.5), 0.0, TIN);
+        l.fill(bx([-px + 18.5, top - 0.85], 0.3, 0.5), 0.0, TIN);
     }
-    let diode = bx([-px + 13.4, row], 2.6, 1.2);
+    status_led(l, [-px + 6.6, low], col(70, 230, 110), if closed { 1.0 } else { 0.0 });
+    let diode = bx([-px + 12.0, low], 2.6, 1.2);
     l.shaded(diode, 0.2, gray(52), gray(22));
     l.fill([diode[0] + 0.3, diode[1], diode[0] + 0.65, diode[3]], 0.0, gray(150));
-    smd(l, [-px + 17.0, row], 1.6, 0.85, gray(30));
+    smd(l, [-px + 18.0, low], 1.6, 0.85, gray(30));
+    // H/L trigger jumper, cap on H.
+    for k in 0..3 {
+        l.fill(bx([-px + 9.4 + k as f32 * 2.54, 0.0], 0.9, 0.9), 0.1, TIN);
+    }
+    l.shaded(bx([-px + 10.67, 0.0], 4.6, 2.2), 0.3, gray(40), gray(14));
+    l.text([-px + 7.6, 1.3, -px + 9.6, 2.9], "H", 0.9, SILK);
+    l.text([-px + 13.2, 1.3, -px + 15.2, 2.9], "L", 0.9, SILK);
 }
 
 /// Relay contact diagram: coil, and a blade thrown to NO when closed or NC when open.

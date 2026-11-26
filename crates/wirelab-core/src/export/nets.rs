@@ -13,9 +13,9 @@ use super::{DocCtx, part_rating, part_ref, part_value};
 
 /// Simulated states the documents quote.
 pub struct OperatingPoints {
-    /// Bank charging at mid voltage with every relay-driving GPIO high.
+    /// Bank charging at mid voltage: charger relays energized, bank relays holding.
     pub charging: Option<(f64, SimOutput)>,
-    /// Bank at the charger set point, relays released.
+    /// Bank at the charger set point: charger relays released, bank relays holding.
     pub ready: Option<(f64, SimOutput)>,
     /// First discharge pulse from the ready state, per electrode.
     pub pulses: Vec<(String, ArcPulse)>,
@@ -26,48 +26,80 @@ pub struct OperatingPoints {
     pub bleed_ohms: Option<f64>,
     /// Charger set point, volts.
     pub v_set: Option<f64>,
+    /// Bank relay released at the set point: its reference, start volts and seconds to 5 V.
+    pub dump: Option<(String, f64, f64)>,
 }
 
-fn relay_gpios(ctx: &DocCtx) -> Vec<u8> {
+/// A relay's signal GPIOs and, when it switches a capacitor's positive node, the level that isolates the bank.
+struct RelayDrive {
+    name: String,
+    gpios: Vec<u8>,
+    hold: Option<bool>,
+}
+
+fn relay_drives(ctx: &DocCtx) -> Vec<RelayDrive> {
+    let term_net = |c: &crate::circuit::PlacedComponent, id: &str| {
+        ctx.nl.net_of(&Endpoint::Terminal { comp: c.id, terminal: id.to_string() })
+    };
+    let mut cap_pos = Vec::new();
+    for (c, d) in ctx.parts() {
+        if let (SimModel::Capacitor { .. }, Some(t)) = (&d.sim, d.terminal_by_role(TerminalRole::Positive))
+            && let Some(n) = term_net(c, &t.id)
+        {
+            cap_pos.push(n);
+        }
+    }
     let mut out = Vec::new();
     for (c, d) in ctx.parts() {
         if !matches!(d.sim, SimModel::RelayModule) {
             continue;
         }
-        let Some(t) = d.terminal_by_role(TerminalRole::Signal) else { continue };
-        if let Some(n) = ctx.nl.net_of(&Endpoint::Terminal { comp: c.id, terminal: t.id.clone() }) {
-            out.extend(ctx.nl.nets[n].gpios.iter().copied());
-        }
+        let net = |role| d.terminal_by_role(role).and_then(|t| term_net(c, &t.id));
+        let Some(signal) = net(TerminalRole::Signal) else { continue };
+        let contacts = [TerminalRole::Common, TerminalRole::NormallyOpen, TerminalRole::NormallyClosed].map(net);
+        let used = |n: Option<usize>| n.is_some_and(|n| ctx.nl.nets[n].endpoints.len() > 1);
+        let on_bank = contacts.iter().flatten().any(|n| cap_pos.contains(n));
+        let hold = match (on_bank, used(contacts[1]), used(contacts[2])) {
+            (true, false, true) => Some(true),
+            (true, true, false) => Some(false),
+            _ => None,
+        };
+        out.push(RelayDrive { name: part_ref(c), gpios: ctx.nl.nets[signal].gpios.clone(), hold });
     }
     out
 }
 
-fn bank_for(ctx: &DocCtx, relays_on: bool) -> PinBank {
+/// Pin drives: charger relays follow `charging`, bank relays hold unless `dumping`, other GPIOs read analog.
+fn bank_for(ctx: &DocCtx, charging: bool, dumping: bool) -> PinBank {
     let mut bank = PinBank::default();
-    let relays = relay_gpios(ctx);
+    let relays = relay_drives(ctx);
     for net in &ctx.nl.nets {
         if net.endpoints.len() < 2 {
             continue;
         }
         for &g in &net.gpios {
             let drive = bank.get_mut(g).expect("gpio in range");
-            *drive = if relays.contains(&g) {
-                PinDrive { mode: PinMode::Output, out_high: relays_on, ..PinDrive::default() }
-            } else {
-                PinDrive { mode: PinMode::Analog, ..PinDrive::default() }
+            let level = relays.iter().find(|r| r.gpios.contains(&g)).map(|r| match r.hold {
+                Some(hold) => hold != dumping,
+                None => charging,
+            });
+            *drive = match level {
+                Some(out_high) => PinDrive { mode: PinMode::Output, out_high, ..PinDrive::default() },
+                None => PinDrive { mode: PinMode::Analog, ..PinDrive::default() },
             };
         }
     }
     bank
 }
 
-fn with_touch(circuit: &Circuit, ctx: &DocCtx, pressed: bool) -> Circuit {
+/// The circuit armed: toggle switches closed, every electrode touching or lifted.
+fn scenario(circuit: &Circuit, ctx: &DocCtx, touching: bool) -> Circuit {
     let mut c = circuit.clone();
     for comp in c.components.values_mut() {
-        if let Some(d) = ctx.lib.component(&comp.def_id)
-            && matches!(d.sim, SimModel::ArcContact { .. })
-        {
-            comp.state = CompState::Button { pressed };
+        match ctx.lib.component(&comp.def_id).map(|d| &d.sim) {
+            Some(SimModel::ArcContact { .. }) => comp.state = CompState::Button { pressed: touching },
+            Some(SimModel::ToggleSwitch) => comp.state = CompState::Toggle { on: true },
+            _ => {}
         }
     }
     c
@@ -99,11 +131,12 @@ pub fn operating_points(ctx: &DocCtx) -> OperatingPoints {
         bank_farads,
         bleed_ohms: None,
         v_set,
+        dump: None,
     };
     if caps.is_empty() {
         return ops;
     }
-    let idle = with_touch(ctx.circuit, ctx, false);
+    let idle = scenario(ctx.circuit, ctx, false);
     let run = |circuit: &Circuit, bank: &PinBank, volts: f64, dt: f64| {
         let mut st = PowerState::default();
         for (id, _) in &caps {
@@ -119,8 +152,8 @@ pub fn operating_points(ctx: &DocCtx) -> OperatingPoints {
         (st, out)
     };
     let top = v_set.unwrap_or(300.0);
-    let on = bank_for(ctx, true);
-    let off = bank_for(ctx, false);
+    let on = bank_for(ctx, true, false);
+    let off = bank_for(ctx, false, false);
     let (_, charging) = run(&idle, &on, top / 2.0, 0.002);
     ops.charging = Some((top / 2.0, charging));
     let (st_ready, ready) = run(&idle, &off, top, 0.002);
@@ -136,7 +169,7 @@ pub fn operating_points(ctx: &DocCtx) -> OperatingPoints {
     }
 
     // Weld pulse from the ready state.
-    let touched = with_touch(ctx.circuit, ctx, true);
+    let touched = scenario(ctx.circuit, ctx, true);
     let (st_weld, _) = run(&touched, &off, top, 0.004);
     for (id, (pulse, _)) in &st_weld.pulses {
         if let Some(c) = ctx.circuit.components.get(id) {
@@ -157,6 +190,24 @@ pub fn operating_points(ctx: &DocCtx) -> OperatingPoints {
         if v >= top * 0.99 {
             ops.charge_time_s = Some(t);
             break;
+        }
+    }
+
+    // Dump from the set point through the first bank relay's released contact.
+    if let Some(relay) = relay_drives(ctx).into_iter().find(|r| r.hold.is_some()) {
+        let dump = bank_for(ctx, false, true);
+        let mut st = PowerState::default();
+        for (id, _) in &caps {
+            st.set_cap_volts(*id, top);
+        }
+        let mut t = 0.0;
+        while t < 30.0 {
+            step(&idle, ctx.board, ctx.lib, &ctx.nl, &dump, &mut st, 0.005);
+            t += 0.005;
+            if st.caps.values().copied().fold(0.0, f64::max) < 5.0 {
+                ops.dump = Some((relay.name, top, t));
+                break;
+            }
         }
     }
     ops
@@ -276,6 +327,9 @@ pub fn markdown(ctx: &DocCtx, ops: &OperatingPoints) -> String {
                 format!("{:.0} s / {:.0} s", tau * (v / 36.0).ln(), tau * (v / 5.0).ln()),
             ));
         }
+    }
+    if let Some((relay, from, t)) = &ops.dump {
+        rows.push((format!("Dump time {from:.0} V -> 5 V ({relay} released)"), format!("{t:.2} s")));
     }
     for (comp, vis) in ops.charging.iter().flat_map(|(_, o)| o.visuals.iter()) {
         let name = ctx.circuit.components.get(comp).map(part_ref).unwrap_or_default();
@@ -440,7 +494,7 @@ pub fn markdown(ctx: &DocCtx, ops: &OperatingPoints) -> String {
             part_ref(c),
             md_cell(&d.name),
             md_cell(&part_value(c, d)),
-            md_cell(&part_rating(d))
+            md_cell(&part_rating(c, d))
         );
     }
     let _ = writeln!(s, "| {} | {} | — | — |", ctx.board_ref(), md_cell(&ctx.board.name));
@@ -522,7 +576,7 @@ pub fn bom_csv(ctx: &DocCtx) -> String {
             csv_cell(&part_ref(c)),
             csv_cell(&d.name),
             csv_cell(&part_value(c, d)),
-            csv_cell(&part_rating(d))
+            csv_cell(&part_rating(c, d))
         );
     }
     let _ = writeln!(s, "{},{},,", csv_cell(&ctx.board_ref()), csv_cell(&ctx.board.name));

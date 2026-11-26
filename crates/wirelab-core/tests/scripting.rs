@@ -77,6 +77,7 @@ fn mini_lib() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "res220".into(),
@@ -92,6 +93,7 @@ fn mini_lib() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib.add_component(ComponentDef {
         id: "button".into(),
@@ -107,6 +109,7 @@ fn mini_lib() -> Library {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     lib
 }
@@ -567,6 +570,7 @@ fn junction_dot_merges_nets() {
         value: String::new(),
         rating: String::new(),
         leads: Vec::new(),
+        pads_mm: Vec::new(),
     });
     let mut circuit = Circuit::new("test-board");
     let led = place(&mut circuit, "led", "led", &SimModel::Led { forward_mv: 2000 });

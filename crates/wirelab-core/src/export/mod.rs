@@ -176,8 +176,11 @@ pub fn part_value(c: &PlacedComponent, d: &ComponentDef) -> String {
     }
 }
 
-/// Rating text for BOMs.
-pub fn part_rating(d: &ComponentDef) -> String {
+/// Rating text for BOMs; a resistor's `watts` prop overrides its library rating.
+pub fn part_rating(c: &PlacedComponent, d: &ComponentDef) -> String {
+    if let (SimModel::Resistor { .. }, Some(w)) = (&d.sim, c.props.get("watts")) {
+        return format!("{w} W");
+    }
     if !d.rating.is_empty() {
         return d.rating.clone();
     }

@@ -98,6 +98,33 @@ pub fn plan_setup(
         let t = def.terminal_by_role(role)?;
         nl.net_of(&crate::circuit::Endpoint::Terminal { comp, terminal: t.id.clone() })
     };
+    // A GPIO wired straight to the net wins over GPIOs reached through resistors.
+    let signal_gpio = |net: usize| -> Option<u8> {
+        nl.nets[net].gpios.first().or_else(|| nl.reach_gpios(net).first()).copied()
+    };
+    // Nets carrying a supply, charger or relay-contact terminal are power wiring.
+    let power_net = |net: usize| -> bool {
+        nl.nets[net].endpoints.iter().any(|ep| {
+            let crate::circuit::Endpoint::Terminal { comp, terminal } = ep else { return false };
+            let Some(def) = circuit.components.get(comp).and_then(|c| lib.component(&c.def_id)) else {
+                return false;
+            };
+            def.terminal(terminal).is_some_and(|t| {
+                matches!(
+                    t.role,
+                    TerminalRole::Positive
+                        | TerminalRole::Negative
+                        | TerminalRole::InPos
+                        | TerminalRole::InNeg
+                        | TerminalRole::OutPos
+                        | TerminalRole::OutNeg
+                        | TerminalRole::Common
+                        | TerminalRole::NormallyOpen
+                        | TerminalRole::NormallyClosed
+                )
+            })
+        })
+    };
 
     for comp in circuit.components.values() {
         let Some(def) = lib.component(&comp.def_id) else { continue };
@@ -131,7 +158,7 @@ pub fn plan_setup(
             }
             SimModel::Buzzer { active } => {
                 let Some(s) = role_net(comp.id, TerminalRole::Signal) else { continue };
-                if let Some(&gpio) = nl.reach_gpios(s).first()
+                if let Some(gpio) = signal_gpio(s)
                     && claim(&mut b, &mut modes, gpio, PinMode::Output, &name) {
                         b.outputs.insert(
                             comp.id,
@@ -145,7 +172,7 @@ pub fn plan_setup(
             }
             SimModel::RelayModule => {
                 let Some(s) = role_net(comp.id, TerminalRole::Signal) else { continue };
-                if let Some(&gpio) = nl.reach_gpios(s).first()
+                if let Some(gpio) = signal_gpio(s)
                     && claim(&mut b, &mut modes, gpio, PinMode::Output, &name) {
                         b.outputs.insert(
                             comp.id,
@@ -155,7 +182,7 @@ pub fn plan_setup(
             }
             SimModel::Servo => {
                 let Some(s) = role_net(comp.id, TerminalRole::Signal) else { continue };
-                if let Some(&gpio) = nl.reach_gpios(s).first()
+                if let Some(gpio) = signal_gpio(s)
                     && claim(&mut b, &mut modes, gpio, PinMode::Pwm, &name) {
                         b.outputs.insert(
                             comp.id,
@@ -169,7 +196,10 @@ pub fn plan_setup(
                 let (Some(a), Some(bb)) = (a, bb) else { continue };
                 let (sense, other) = if !nl.nets[a].gpios.is_empty() { (a, bb) } else { (bb, a) };
                 let Some(&gpio) = nl.nets[sense].gpios.first() else {
-                    b.warnings.push(format!("{name}: not connected to any GPIO"));
+                    // Switches in supply wiring get no binding and no warning.
+                    if !power_net(a) && !power_net(bb) {
+                        b.warnings.push(format!("{name}: not connected to any GPIO"));
+                    }
                     continue;
                 };
                 let rails = nl.reach_rails(other);

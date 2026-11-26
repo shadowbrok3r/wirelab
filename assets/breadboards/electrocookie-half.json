@@ -4,7 +4,7 @@
  "vendor": "ElectroCookie",
  "width_mm": 88.9,
  "height_mm": 52.07,
- "corner_radius_mm": 3.5,
+ "corner_radius_mm": 4.5,
  "pitch_mm": 2.54,
  "colors": {
   "mask": [

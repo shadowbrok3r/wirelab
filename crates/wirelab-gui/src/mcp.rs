@@ -68,7 +68,7 @@ pub enum Cmd {
     ImportProject { project: Project, from: Option<String> },
     AddBreadboard { profile: String, x: f32, y: f32, rotation: u16, label: Option<String> },
     MoveBreadboard { bb: u32, x: Option<f32>, y: Option<f32>, rotation: Option<u16> },
-    PlaceBoard { x: Option<f32>, y: Option<f32>, rotation: Option<u16> },
+    PlaceBoard { x: Option<f32>, y: Option<f32>, rotation: Option<u16>, display_rotation: Option<u16> },
     RemoveBreadboard { bb: u32 },
     SeatComponent { comp: String, terminal: String, hole: String, bb: Option<u32>, rotation: Option<u16>, span: Option<f32> },
     InspectHole { hole: String, bb: Option<u32> },
@@ -199,6 +199,8 @@ pub struct PlaceBoardArgs {
     pub y: Option<f32>,
     /// 0, 90, 180 or 270 (clockwise) about the board's centre; 180 puts the USB end on top.
     pub rotation: Option<u16>,
+    /// On-board display picture turn relative to the board: 0, 90, 180 or 270; 180 with a 180 board reads upright.
+    pub display_rotation: Option<u16>,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -643,9 +645,9 @@ impl WirelabTools {
         self.ask(Cmd::MoveBreadboard { bb: a.bb, x: a.x, y: a.y, rotation: a.rotation }).await
     }
 
-    #[tool(description = "Move or rotate the dev board. Its header pins seat into breadboard holes they land on.")]
+    #[tool(description = "Move or rotate the dev board, or turn its on-board display picture (display_rotation). Its header pins seat into breadboard holes they land on.")]
     async fn place_board(&self, Parameters(a): Parameters<PlaceBoardArgs>) -> String {
-        self.ask(Cmd::PlaceBoard { x: a.x, y: a.y, rotation: a.rotation }).await
+        self.ask(Cmd::PlaceBoard { x: a.x, y: a.y, rotation: a.rotation, display_rotation: a.display_rotation }).await
     }
 
     #[tool(description = "Delete a breadboard and the wires landing on its holes.")]
@@ -965,6 +967,8 @@ impl WireLabApp {
                 Ok(json!({
                     "project": self.project.name,
                     "board": self.project.circuit.board_id,
+                    "board_rotation": self.project.circuit.board_rotation,
+                    "display_rotation": self.project.circuit.display_rotation,
                     "breadboards": breadboards,
                     "seated_leads": seats,
                     "leads_missing_holes": misses,
@@ -1082,15 +1086,18 @@ impl WireLabApp {
                 self.topo_rev += 1;
                 Ok(json!({ "bb": id.0 }))
             }
-            Cmd::PlaceBoard { x, y, rotation } => {
+            Cmd::PlaceBoard { x, y, rotation, display_rotation } => {
                 let c = &mut self.project.circuit;
                 c.board_pos = [x.unwrap_or(c.board_pos[0]), y.unwrap_or(c.board_pos[1])];
                 if let Some(rot) = rotation {
                     c.board_rotation = rot % 360 / 90 * 90;
                 }
-                let (pos, rot) = (c.board_pos, c.board_rotation);
+                if let Some(rot) = display_rotation {
+                    c.display_rotation = rot % 360 / 90 * 90;
+                }
+                let (pos, rot, disp) = (c.board_pos, c.board_rotation, c.display_rotation);
                 self.topo_rev += 1;
-                Ok(json!({ "board_pos": pos, "rotation": rot }))
+                Ok(json!({ "board_pos": pos, "rotation": rot, "display_rotation": disp }))
             }
             Cmd::MoveBreadboard { bb, x, y, rotation } => {
                 let id = self.resolve_bb(Some(bb))?;

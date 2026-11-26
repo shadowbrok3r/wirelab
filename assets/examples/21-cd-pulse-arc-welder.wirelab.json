@@ -3,7 +3,7 @@
  "circuit": {
   "board_id": "esp32-c6-lcd-147",
   "board_pos": [
-   110.0,
+   140.0,
    -46.0
   ],
   "components": {
@@ -25,8 +25,8 @@
     "id": 2,
     "def_id": "relay-module-1ch",
     "pos": [
-     78.0,
-     -28.0
+     92.0,
+     -22.0
     ],
     "rotation": 180,
     "label": "K1",
@@ -194,7 +194,7 @@
     "id": 14,
     "def_id": "junction-dot",
     "pos": [
-     100.0,
+     110.0,
      30.0
     ],
     "rotation": 0,
@@ -203,7 +203,124 @@
     "state": {
      "kind": "none"
     },
-    "script": "// CD pulse-arc welder firmware model (ESP32-C6-LCD-1.47).\n// Senses the bank through the R1-R4 divider (TAP = 2/302 of the bank) and R5,\n// and switches the charger's 12 V input with relay K1.\n// GPIO1 (ADC) and GPIO19 (K1.IN) are sim-only picks: the real pins are TBD.\n\nfn fmt1(x) {\n    let neg = x < 0.0;\n    let t = (x.abs() * 10.0).round().to_int();\n    let s = `${t / 10}.${t % 10}`;\n    if neg { \"-\" + s } else { s }\n}\n\nfn maxf(a, b) { if a > b { a } else { b } }\n\n// Two-point calibration: ADC millivolts -> bank volts, both points read off a meter.\nfn bank_volts(mv, k) {\n    k.v_lo + (mv - k.mv_lo) * (k.v_hi - k.v_lo) / (k.mv_hi - k.mv_lo)\n}\n\nfn state_color(st) {\n    switch st {\n        \"SAFE\" => [40, 60, 140],\n        \"CHARGE\" => [200, 130, 0],\n        \"READY\" => [0, 150, 70],\n        \"HOLD\" => [0, 110, 170],\n        _ => [200, 0, 0]\n    }\n}\n\nfn hint(st, fault) {\n    switch st {\n        \"SAFE\" => \"relay open\",\n        \"CHARGE\" => \"charging bank...\",\n        \"READY\" => \"touch pen to work\",\n        \"HOLD\" => \"welded - lift pen\",\n        \"FAULT\" => fault,\n        _ => \"\"\n    }\n}\n\nfn paint_header(st) {\n    let c = state_color(st);\n    lcd_rect(0, 0, 128, 18, c[0], c[1], c[2]);\n    lcd_text(4, 5, \"CD WELDER\", 255, 255, 255);\n    lcd_text(124 - st.len * 6, 5, st, 255, 255, 255);\n}\n\nfn paint_footer(text) {\n    lcd_rect(0, 112, 128, 16, 16, 18, 30);\n    lcd_text(4, 115, text, 225, 225, 235);\n}\n\nfn paint_line(y, text, r, g, b) {\n    lcd_rect(0, y - 2, 128, 13, 6, 8, 16);\n    lcd_text(4, y, text, r, g, b);\n}\n\nfn paint_bar(v, set, full) {\n    let w = (v / full * 120.0).to_int();\n    if w < 0 { w = 0; }\n    if w > 120 { w = 120; }\n    lcd_rect(4, 74, 120, 8, 30, 34, 48);\n    if w > 0 {\n        if v >= set - 4.0 { lcd_rect(4, 74, w, 8, 60, 220, 110); } else { lcd_rect(4, 74, w, 8, 240, 160, 40); }\n    }\n    let s = (set / full * 120.0).to_int();\n    lcd_rect(4 + s, 71, 2, 14, 255, 255, 255);\n}\n\nfn on_start() {\n    this.k = #{\n        adc_pin: 1,          // TBD on hardware (free ADC1 pins: GPIO0-3)\n        boot_pin: 9,         // on-board BOOT button cycles the set point\n        mv_lo: 0.0,          // calibration point 1: ADC mV ...\n        v_lo: 0.0,           // ... and the meter's bank volts\n        mv_hi: 1986.8,       // calibration point 2 (ideal 2/302 divider at 300 V)\n        v_hi: 300.0,\n        presets: [120.0, 180.0, 240.0, 280.0],\n        margin_v: 3.0,       // open K1 this far below the set point\n        relay_s: 0.010,      // K1 release time added to the loop period\n        cutoff_v: 310.0,     // hard cutoff\n        timeout_ms: 30000,   // longest charge\n        weld_drop_v: 20.0,   // a sample-to-sample drop this big is a weld\n        holdoff_ms: 1500,    // K1 stays open after a weld\n        topup_v: 8.0,        // recharge when READY sags this far\n        stuck_ms: 800,       // charging that cannot pass stuck_v: pen on the work or a short\n        stuck_v: 30.0,\n        c_f: 0.00019,        // bank capacitance\n        boot_ms: 1000,\n        full_v: 330.0        // bar-graph full scale (cap rating)\n    };\n    this.st = \"SAFE\";\n    this.t_state = millis();\n    this.preset = 2;\n    this.set_v = this.k.presets[2];\n    this.v = 0.0;\n    this.t_prev = millis();\n    this.slope = 0.0;\n    this.inc = 0.0;          // last per-sample rise while charging\n    this.step = 0.0;         // typical per-sample rise near the set point\n    this.welds = 0;\n    this.last_j = 0.0;\n    this.fault = \"\";\n    this.v_shown = -999.0;\n    this.t_paint = 0;\n    k1.off();                                   // relay off at boot\n    pin(this.k.adc_pin).watch_analog(5);\n    pin(this.k.boot_pin).input_pullup();\n    lcd_init(6, 7, 14, 15, 21);\n    lcd_clear(6, 8, 16);\n    paint_header(\"SAFE\");\n    paint_line(58, `SET   ${fmt1(this.set_v)} V`, 255, 220, 90);\n    paint_line(90, \"WELDS 0\", 200, 200, 210);\n    paint_footer(hint(\"SAFE\", \"\"));\n    rgb(8, 12, 30);\n    log(\"K1 open at boot; charging starts in 1 s. BOOT cycles the set point.\");\n}\n\nfn on_tick(dt_ms) {\n    if this.st == () { return; }\n    let k = this.k;\n    let now = millis();\n    let mv = pin(k.adc_pin).millivolts().to_float();\n    let v = bank_volts(mv, k);\n\n    // Fresh samples update the slope; a big drop between samples is a weld.\n    let weld = false;\n    if v != this.v {\n        let dt = (now - this.t_prev).to_float() / 1000.0;\n        if this.v - v >= k.weld_drop_v {\n            weld = true;\n            this.last_j = 0.5 * k.c_f * (this.v * this.v - v * v);\n        }\n        if dt > 0.0 { this.slope = (v - this.v) / dt; }\n        this.inc = maxf(v - this.v, 0.0);\n        if this.st == \"CHARGE\" && v > this.set_v * 0.6 && this.inc > 0.0 { this.step = this.inc; }\n        this.v = v;\n        this.t_prev = now;\n    }\n\n    let st = this.st;\n    let next = st;\n    let age = now - this.t_state;\n    if v > k.cutoff_v {\n        next = \"FAULT\";\n        this.fault = \"OVER 310 V\";\n    } else {\n        switch st {\n            \"SAFE\" => {\n                if age >= k.boot_ms { next = \"CHARGE\"; }\n            },\n            \"CHARGE\" => {\n                // Predict where the bank lands once K1 has actually released: half the\n                // next sample's rise (the loop's own latency) plus the relay's release time.\n                let predicted = v + 0.5 * this.inc + maxf(this.slope, 0.0) * k.relay_s;\n                if weld {\n                    next = \"HOLD\";\n                } else if predicted >= this.set_v - k.margin_v {\n                    next = \"READY\";\n                } else if age > k.timeout_ms {\n                    next = \"FAULT\";\n                    this.fault = \"CHARGE TIMEOUT\";\n                } else if age > k.stuck_ms && v < k.stuck_v {\n                    next = \"FAULT\";\n                    this.fault = \"NO RISE - SHORT?\";\n                }\n            },\n            \"READY\" => {\n                if weld {\n                    next = \"HOLD\";\n                } else if v < this.set_v - maxf(k.topup_v, this.step) {\n                    // Top up only once the bank has sagged by at least one charge step.\n                    next = \"CHARGE\";\n                }\n            },\n            \"HOLD\" => {\n                if age >= k.holdoff_ms { next = \"CHARGE\"; }\n            },\n            _ => {}\n        }\n    }\n\n    if next != st {\n        this.st = next;\n        this.t_state = now;\n        if next == \"CHARGE\" { k1.on(); } else { k1.off(); }\n        let c = state_color(next);\n        rgb(c[0] / 5, c[1] / 5, c[2] / 5);\n        paint_header(next);\n        paint_footer(hint(next, this.fault));\n        if next == \"HOLD\" && weld {\n            this.welds += 1;\n            paint_line(90, `WELDS ${this.welds}  ${fmt1(this.last_j)} J`, 200, 200, 210);\n            log(`weld #${this.welds}: ${fmt1(this.last_j)} J from the bank`);\n        }\n        if next == \"FAULT\" { log(`FAULT: ${this.fault} - K1 open`); }\n        log(`${st} -> ${next} at ${fmt1(v)} V`);\n    }\n\n    if (v - this.v_shown).abs() >= 0.5 && now - this.t_paint >= 60 {\n        this.v_shown = v;\n        this.t_paint = now;\n        let e = 0.5 * k.c_f * v * v;\n        paint_line(24, `BANK  ${fmt1(v)} V`, 255, 255, 255);\n        paint_line(40, `E     ${fmt1(e)} J`, 170, 200, 255);\n        paint_bar(v, this.set_v, k.full_v);\n        paint_line(100, `ADC ${mv.to_int()} mV`, 110, 120, 150);\n    }\n}\n\n// BOOT: clears a fault, otherwise steps through the set-point presets.\nfn on_pin(gpio, high) {\n    if this.st == () || gpio != this.k.boot_pin || high { return; }\n    if this.st == \"FAULT\" {\n        if this.v < this.k.cutoff_v {\n            this.st = \"SAFE\";\n            this.t_state = millis();\n            this.fault = \"\";\n            k1.off();\n            paint_header(\"SAFE\");\n            paint_footer(hint(\"SAFE\", \"\"));\n            log(\"fault cleared\");\n        }\n        return;\n    }\n    this.preset = (this.preset + 1) % this.k.presets.len();\n    this.set_v = this.k.presets[this.preset];\n    paint_line(58, `SET   ${fmt1(this.set_v)} V`, 255, 220, 90);\n    this.v_shown = -999.0;\n    log(`set point ${fmt1(this.set_v)} V`);\n}\n"
+    "script": "// CD pulse-arc welder firmware model, controls rev B: bank on GPIO1, ARM switch on GPIO3, DUMP button on GPIO20.\n// K1 (GPIO19) feeds the charger; K2 (GPIO18) keeps the dump resistor R6 off the bank only while energized.\n\nfn fmt1(x) {\n    let neg = x < 0.0;\n    let t = (x.abs() * 10.0).round().to_int();\n    let s = `${t / 10}.${t % 10}`;\n    if neg { \"-\" + s } else { s }\n}\n\nfn maxf(a, b) { if a > b { a } else { b } }\n\n// Two-point calibration: ADC millivolts -> bank volts, both points read off a meter.\nfn bank_volts(mv, k) {\n    k.v_lo + (mv - k.mv_lo) * (k.v_hi - k.v_lo) / (k.mv_hi - k.mv_lo)\n}\n\nfn state_color(st) {\n    switch st {\n        \"SAFE\" => [40, 60, 140],\n        \"ARMING\" => [150, 110, 0],\n        \"CHARGE\" => [200, 130, 0],\n        \"READY\" => [0, 150, 70],\n        \"HOLD\" => [0, 110, 170],\n        \"DUMPING\" => [130, 40, 150],\n        _ => [200, 0, 0]\n    }\n}\n\nfn hint(st, fault, arm_on, latched) {\n    switch st {\n        \"SAFE\" => {\n            if latched && arm_on { \"ARM off, then on\" } else if arm_on { \"arming...\" } else { \"switch ARM on\" }\n        },\n        \"ARMING\" => \"opening dump\",\n        \"CHARGE\" => \"charging bank...\",\n        \"READY\" => \"touch pen to work\",\n        \"HOLD\" => \"welded - lift pen\",\n        \"DUMPING\" => \"dumping bank...\",\n        \"FAULT\" => {\n            if fault == \"DUMP STALLED\" { \"switch ARM off\" } else { fault }\n        },\n        _ => \"\"\n    }\n}\n\n// States in which the charger may run and K2 holds the dump open.\nfn is_armed_state(st) {\n    st == \"ARMING\" || st == \"CHARGE\" || st == \"READY\" || st == \"HOLD\"\n}\n\nfn paint_header(st) {\n    let c = state_color(st);\n    lcd_rect(0, 0, 128, 18, c[0], c[1], c[2]);\n    lcd_text(4, 5, \"CD WELDER\", 255, 255, 255);\n    lcd_text(124 - st.len * 6, 5, st, 255, 255, 255);\n}\n\nfn paint_footer(text) {\n    lcd_rect(0, 112, 128, 16, 16, 18, 30);\n    lcd_text(4, 115, text, 225, 225, 235);\n}\n\nfn paint_line(y, text, r, g, b) {\n    lcd_rect(0, y - 2, 128, 13, 6, 8, 16);\n    lcd_text(4, y, text, r, g, b);\n}\n\nfn paint_bar(v, set, full) {\n    let w = (v / full * 120.0).to_int();\n    if w < 0 { w = 0; }\n    if w > 120 { w = 120; }\n    lcd_rect(4, 74, 120, 8, 30, 34, 48);\n    if w > 0 {\n        if v >= set - 4.0 { lcd_rect(4, 74, w, 8, 60, 220, 110); } else { lcd_rect(4, 74, w, 8, 240, 160, 40); }\n    }\n    let s = (set / full * 120.0).to_int();\n    lcd_rect(4 + s, 71, 2, 14, 255, 255, 255);\n}\n\nfn on_start() {\n    this.k = #{\n        adc_pin: 1,          // bank sense: R1-R4 tap through R5 (ADC1 ch1)\n        arm_pin: 3,          // ARM switch sense: R7 47 k / R8 10 k from S1's output (ADC1 ch3)\n        dump_pin: 20,        // DUMP button S2 to GND, internal pull-up\n        boot_pin: 9,         // on-board BOOT: short press steps the set point, 1 s hold clears a fault (no arming)\n        mv_lo: 0.0,          // calibration point 1: ADC mV ...\n        v_lo: 0.0,           // ... and the meter's bank volts\n        mv_hi: 1986.8,       // calibration point 2 (ideal 2/302 divider at 300 V)\n        v_hi: 300.0,\n        arm_ratio: 5.7,      // supply volts per ADC volt (57/10)\n        arm_on_v: 8.0,       // ARM switch reads ON above this supply ...\n        arm_off_v: 6.0,      // ... and OFF below this\n        presets: [120.0, 180.0, 240.0, 280.0],\n        margin_v: 3.0,       // open K1 this far below the set point\n        relay_s: 0.010,      // K1 release time added to the sample interval\n        cutoff_v: 310.0,     // hard cutoff\n        timeout_ms: 30000,   // longest charge\n        weld_drop_v: 20.0,   // a sample-to-sample drop this big is a weld\n        holdoff_ms: 1500,    // K1 stays open after a weld\n        topup_v: 8.0,        // recharge when READY sags this far\n        stuck_ms: 800,       // charging that cannot pass stuck_v: pen on the work or a short\n        stuck_v: 30.0,\n        safe_v: 5.0,         // the bank counts as empty below this ...\n        safe_ms: 200,        // ... for this long\n        k2_delay_ms: 20,     // K2 releases this long after K1 opens\n        settle_ms: 60,       // K2 energized this long before K1 may close\n        stall_half_ms: 1000, // a dump must halve the bank within this ...\n        stall_ms: 3000,      // ... and be under stall_v within this\n        stall_v: 30.0,\n        long_ms: 1000,       // BOOT hold that clears a fault\n        c_f: 0.00019,        // bank capacitance\n        boot_ms: 1000,       // ARM readings this soon after boot do not release the latch\n        full_v: 330.0        // bar-graph full scale (cap rating)\n    };\n    this.st = \"SAFE\";\n    this.t_state = millis();\n    this.t_boot = millis();\n    this.preset = 2;\n    this.set_v = this.k.presets[2];\n    this.v = 0.0;\n    this.t_prev = millis();\n    this.rate = 0.0;         // rise rate in V/s: positive slopes, lightly smoothed\n    this.dt_s = 0.0;         // interval between the last two fresh samples\n    this.inc = 0.0;          // last per-sample rise while charging\n    this.step = 0.0;         // typical per-sample rise near the set point\n    this.welds = 0;\n    this.last_j = 0.0;\n    this.fault = \"\";\n    this.arm_on = false;     // ARM switch state after hysteresis\n    this.latched = true;     // boot, DUMP and fault latch: released while ARM reads OFF\n    this.dump_down = false;  // DUMP held: nothing arms\n    this.fault_ack = false;  // ARM went ON -> OFF during a fault\n    this.dump_req = false;\n    this.k2_on = false;\n    this.t_k2 = 0;\n    this.k2_off_at = -1;     // millis when K2 is due to release, -1 = none\n    this.dump_v0 = 0.0;\n    this.t_dump = millis();\n    this.t_low = -1;         // millis the bank first read empty, -1 = not empty\n    this.boot_down = false;\n    this.boot_long = false;\n    this.t_press = 0;\n    this.hint_shown = \"\";\n    this.v_shown = -999.0;\n    this.s_shown = -999.0;\n    this.t_paint = 0;\n    k1.off();\n    k2.off();\n    pin(this.k.adc_pin).watch_analog(5);\n    pin(this.k.arm_pin).watch_analog(20);\n    pin(this.k.dump_pin).input_pullup();\n    pin(this.k.boot_pin).input_pullup();\n    lcd_init(6, 7, 14, 15, 21);\n    lcd_clear(6, 8, 16);\n    paint_header(\"SAFE\");\n    paint_line(58, `SET   ${fmt1(this.set_v)} V`, 255, 220, 90);\n    paint_line(90, \"WELDS 0\", 200, 200, 210);\n    this.hint_shown = hint(\"SAFE\", \"\", false, false);\n    paint_footer(this.hint_shown);\n    rgb(8, 12, 30);\n    log(\"K1 and K2 released at boot: bank dumping, disarmed. ARM OFF -> ON arms.\");\n}\n\nfn on_tick(dt_ms) {\n    if this.st == () { return; }\n    let k = this.k;\n    let now = millis();\n    let mv = pin(k.adc_pin).millivolts().to_float();\n    let v = bank_volts(mv, k);\n\n    // ARM switch with hysteresis; reading OFF with DUMP up releases the latch.\n    let supply = pin(k.arm_pin).millivolts().to_float() * k.arm_ratio / 1000.0;\n    let was_on = this.arm_on;\n    if !was_on && supply > k.arm_on_v { this.arm_on = true; }\n    if was_on && supply < k.arm_off_v { this.arm_on = false; }\n    if was_on && !this.arm_on && this.st == \"FAULT\" { this.fault_ack = true; }\n    if this.arm_on { this.fault_ack = false; }\n    if !this.arm_on && !this.dump_down && now - this.t_boot >= k.boot_ms { this.latched = false; }\n    if this.arm_on != was_on {\n        let word = if this.arm_on { \"ON\" } else { \"OFF\" };\n        log(`ARM switch ${word} (${fmt1(supply)} V)`);\n    }\n\n    // BOOT held for long_ms requests a fault clear.\n    let clear = false;\n    if this.boot_down && !this.boot_long && now - this.t_press >= k.long_ms {\n        this.boot_long = true;\n        clear = true;\n    }\n\n    // Fresh samples update the rise rate; a big drop between samples is a weld.\n    let weld = false;\n    if v != this.v {\n        let dt = (now - this.t_prev).to_float() / 1000.0;\n        if this.v - v >= k.weld_drop_v {\n            weld = true;\n            this.last_j = 0.5 * k.c_f * (this.v * this.v - v * v);\n        }\n        if dt > 0.0 {\n            let r = maxf((v - this.v) / dt, 0.0);\n            this.rate = if this.rate > 0.0 { 0.5 * (this.rate + r) } else { r };\n            this.dt_s = dt;\n        }\n        this.inc = maxf(v - this.v, 0.0);\n        if this.st == \"CHARGE\" && v > this.set_v * 0.6 && this.inc > 0.0 { this.step = this.inc; }\n        this.v = v;\n        this.t_prev = now;\n    }\n\n    let st = this.st;\n    let next = st;\n    let age = now - this.t_state;\n    let armed = this.arm_on && !this.latched && !this.dump_down;\n    if v > k.cutoff_v && st != \"FAULT\" {\n        next = \"FAULT\";\n        this.fault = \"OVER 310 V\";\n    } else if st == \"FAULT\" {\n        if (this.fault_ack || clear) && v < k.cutoff_v {\n            next = if v >= k.safe_v { \"DUMPING\" } else { \"SAFE\" };\n            this.fault_ack = false;\n            this.latched = true;\n            log(\"fault cleared\");\n        }\n    } else if is_armed_state(st) && (this.dump_req || !armed) {\n        next = \"DUMPING\";\n    } else {\n        switch st {\n            \"SAFE\" => {\n                if v >= k.safe_v {\n                    next = \"DUMPING\";\n                } else if armed {\n                    next = \"ARMING\";\n                }\n            },\n            \"DUMPING\" => {\n                let t = now - this.t_dump;\n                if v < k.safe_v {\n                    if this.t_low < 0 { this.t_low = now; }\n                    if now - this.t_low >= k.safe_ms { next = \"SAFE\"; }\n                } else {\n                    this.t_low = -1;\n                    if (t >= k.stall_half_ms && v > this.dump_v0 * 0.5) || (t >= k.stall_ms && v > k.stall_v) {\n                        next = \"FAULT\";\n                        this.fault = \"DUMP STALLED\";\n                    }\n                }\n            },\n            \"ARMING\" => {\n                if v >= k.safe_v {\n                    next = \"DUMPING\";\n                } else if this.k2_on && now - this.t_k2 >= k.settle_ms {\n                    next = \"CHARGE\";\n                }\n            },\n            \"CHARGE\" => {\n                // Bank volts after the next sample interval plus K1's release time.\n                let predicted = v + this.rate * (k.relay_s + this.dt_s);\n                if weld {\n                    next = \"HOLD\";\n                } else if predicted >= this.set_v - k.margin_v {\n                    next = \"READY\";\n                } else if age > k.timeout_ms {\n                    next = \"FAULT\";\n                    this.fault = \"CHARGE TIMEOUT\";\n                } else if age > k.stuck_ms && v < k.stuck_v {\n                    next = \"FAULT\";\n                    this.fault = \"NO RISE - SHORT?\";\n                }\n            },\n            \"READY\" => {\n                if weld {\n                    next = \"HOLD\";\n                } else if v < this.set_v - maxf(k.topup_v, this.step) {\n                    // Top up only once the bank has sagged by at least one charge step.\n                    next = \"CHARGE\";\n                }\n            },\n            \"HOLD\" => {\n                if age >= k.holdoff_ms { next = \"CHARGE\"; }\n            },\n            _ => {}\n        }\n    }\n    this.dump_req = false;\n\n    if next != st {\n        this.st = next;\n        this.t_state = now;\n        switch next {\n            \"ARMING\" => {\n                k2.on();\n                this.k2_on = true;\n                this.t_k2 = now;\n                this.k2_off_at = -1;\n            },\n            \"CHARGE\" => {\n                // K1 closes only once K2 has held the dump open for settle_ms.\n                if this.k2_on && now - this.t_k2 >= k.settle_ms { k1.on(); } else { k1.off(); }\n                this.rate = 0.0;\n            },\n            \"DUMPING\" => {\n                k1.off();\n                if this.k2_on { this.k2_off_at = now + k.k2_delay_ms; }\n                this.dump_v0 = v;\n                this.t_dump = now;\n                this.t_low = -1;\n            },\n            \"FAULT\" => {\n                k1.off();\n                if this.k2_on { this.k2_off_at = now + k.k2_delay_ms; }\n            },\n            _ => { k1.off(); }\n        }\n        let c = state_color(next);\n        rgb(c[0] / 5, c[1] / 5, c[2] / 5);\n        paint_header(next);\n        if next == \"HOLD\" && weld {\n            this.welds += 1;\n            paint_line(90, `WELDS ${this.welds}  ${fmt1(this.last_j)} J`, 200, 200, 210);\n            log(`weld #${this.welds}: ${fmt1(this.last_j)} J from the bank`);\n        }\n        if next == \"FAULT\" {\n            paint_line(90, this.fault, 255, 90, 90);\n            log(`FAULT: ${this.fault} - K1 open, K2 released`);\n        } else if st == \"FAULT\" {\n            paint_line(90, `WELDS ${this.welds}`, 200, 200, 210);\n            this.fault = \"\";\n        }\n        log(`${st} -> ${next} at ${fmt1(v)} V`);\n    }\n\n    // K2 releases k2_delay_ms after K1 opened.\n    if this.k2_off_at >= 0 && now >= this.k2_off_at {\n        k2.off();\n        this.k2_on = false;\n        this.k2_off_at = -1;\n    }\n\n    let h = hint(this.st, this.fault, this.arm_on, this.latched);\n    if h != this.hint_shown {\n        this.hint_shown = h;\n        paint_footer(h);\n    }\n\n    if now - this.t_paint >= 60 && ((v - this.v_shown).abs() >= 0.5 || (supply - this.s_shown).abs() >= 0.5) {\n        this.v_shown = v;\n        this.s_shown = supply;\n        this.t_paint = now;\n        let e = 0.5 * k.c_f * v * v;\n        paint_line(24, `BANK  ${fmt1(v)} V`, 255, 255, 255);\n        paint_line(40, `E     ${fmt1(e)} J`, 170, 200, 255);\n        paint_bar(v, this.set_v, k.full_v);\n        paint_line(100, `ADC ${mv.to_int()} ARM ${fmt1(supply)}V`, 110, 120, 150);\n    }\n}\n\n// DUMP disarms and latches; BOOT steps the set point on a short press (a 1 s hold clears a fault in on_tick).\nfn on_pin(gpio, high) {\n    if this.st == () { return; }\n    let k = this.k;\n    if gpio == k.dump_pin {\n        this.dump_down = !high;\n        if !high {\n            this.latched = true;\n            this.dump_req = true;\n            log(\"DUMP pressed: disarmed until the ARM switch goes OFF -> ON\");\n        }\n        return;\n    }\n    if gpio != k.boot_pin { return; }\n    if !high {\n        this.boot_down = true;\n        this.boot_long = false;\n        this.t_press = millis();\n        return;\n    }\n    if !this.boot_down { return; }\n    this.boot_down = false;\n    if this.boot_long { return; }\n    this.preset = (this.preset + 1) % k.presets.len();\n    this.set_v = k.presets[this.preset];\n    paint_line(58, `SET   ${fmt1(this.set_v)} V`, 255, 220, 90);\n    this.v_shown = -999.0;\n    log(`set point ${fmt1(this.set_v)} V`);\n}\n"
+   },
+   "15": {
+    "id": 15,
+    "def_id": "toggle-switch",
+    "pos": [
+     50.0,
+     -62.0
+    ],
+    "rotation": 0,
+    "label": "S1",
+    "props": {},
+    "state": {
+     "kind": "toggle",
+     "on": false
+    }
+   },
+   "16": {
+    "id": 16,
+    "def_id": "resistor-47k",
+    "pos": [
+     64.0,
+     -62.0
+    ],
+    "rotation": 0,
+    "label": "R7",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "17": {
+    "id": 17,
+    "def_id": "resistor-10k",
+    "pos": [
+     70.0,
+     -52.0
+    ],
+    "rotation": 90,
+    "label": "R8",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "18": {
+    "id": 18,
+    "def_id": "push-button",
+    "pos": [
+     185.0,
+     -34.0
+    ],
+    "rotation": 0,
+    "label": "S2",
+    "props": {},
+    "state": {
+     "kind": "button",
+     "pressed": false
+    }
+   },
+   "19": {
+    "id": 19,
+    "def_id": "relay-module-1ch",
+    "pos": [
+     -36.0,
+     -70.0
+    ],
+    "rotation": 180,
+    "label": "K2",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "20": {
+    "id": 20,
+    "def_id": "resistor-1k",
+    "pos": [
+     -62.0,
+     -44.0
+    ],
+    "rotation": 0,
+    "label": "R6",
+    "props": {
+     "watts": 10.0,
+     "v_max": 500.0
+    },
+    "state": {
+     "kind": "none"
+    }
+   },
+   "21": {
+    "id": 21,
+    "def_id": "resistor-10k",
+    "pos": [
+     124.0,
+     -40.0
+    ],
+    "rotation": 0,
+    "label": "R9",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
+   },
+   "22": {
+    "id": 22,
+    "def_id": "resistor-10k",
+    "pos": [
+     -20.0,
+     -89.0
+    ],
+    "rotation": 180,
+    "label": "R10",
+    "props": {},
+    "state": {
+     "kind": "none"
+    }
    }
   },
   "wires": {
@@ -216,15 +333,17 @@
     },
     "b": {
      "at": "terminal",
-     "comp": 2,
-     "terminal": "common"
+     "comp": 15,
+     "terminal": "a"
     },
     "color": [
      230,
      200,
      40
     ],
-    "waypoints": []
+    "waypoints": [],
+    "label": "12V-A",
+    "spec": "18 AWG or heavier, ~3 A while charging; PS1 + to the ARM switch S1"
    },
    "2": {
     "id": 2,
@@ -562,7 +681,16 @@
      60,
      150
     ],
-    "waypoints": []
+    "waypoints": [
+     [
+      130.0,
+      -19.46
+     ],
+     [
+      130.0,
+      -20.94
+     ]
+    ]
    },
    "20": {
     "id": 20,
@@ -580,7 +708,16 @@
      40,
      44
     ],
-    "waypoints": []
+    "waypoints": [
+     [
+      128.0,
+      -22.0
+     ],
+     [
+      128.0,
+      -23.48
+     ]
+    ]
    },
    "21": {
     "id": 21,
@@ -598,7 +735,24 @@
      235,
      235
     ],
-    "waypoints": []
+    "waypoints": [
+     [
+      133.0,
+      -24.54
+     ],
+     [
+      133.0,
+      -62.0
+     ],
+     [
+      166.0,
+      -62.0
+     ],
+     [
+      166.0,
+      -36.18
+     ]
+    ]
    },
    "22": {
     "id": 22,
@@ -660,10 +814,516 @@
      150
     ],
     "waypoints": []
+   },
+   "25": {
+    "id": 25,
+    "a": {
+     "at": "terminal",
+     "comp": 15,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "common"
+    },
+    "color": [
+     230,
+     200,
+     40
+    ],
+    "waypoints": [
+     [
+      56.5,
+      -62.0
+     ],
+     [
+      56.5,
+      -22.0
+     ]
+    ],
+    "label": "12V-ARM",
+    "spec": "18 AWG or heavier, ~3 A while charging; S1 output (switched 12 V) to K1 COM"
+   },
+   "26": {
+    "id": 26,
+    "a": {
+     "at": "terminal",
+     "comp": 15,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 16,
+     "terminal": "a"
+    },
+    "color": [
+     230,
+     200,
+     40
+    ],
+    "waypoints": [],
+    "label": "R7-LEAD",
+    "spec": "R7 47 k lead soldered to S1's output lug"
+   },
+   "27": {
+    "id": 27,
+    "a": {
+     "at": "terminal",
+     "comp": 16,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 17,
+     "terminal": "a"
+    },
+    "color": [
+     60,
+     170,
+     80
+    ],
+    "waypoints": [],
+    "label": "R7-R8",
+    "spec": "R7 and R8 leads soldered together; the ARM sense wire leaves here"
+   },
+   "28": {
+    "id": 28,
+    "a": {
+     "at": "terminal",
+     "comp": 17,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "neg"
+    },
+    "color": [
+     40,
+     40,
+     44
+    ],
+    "waypoints": [
+     [
+      70.0,
+      -44.0
+     ],
+     [
+      -4.0,
+      -44.0
+     ],
+     [
+      -4.0,
+      -62.0
+     ]
+    ],
+    "label": "R8-GND",
+    "spec": "R8 10 k lead to PS1 - (12 V return) at the input"
+   },
+   "29": {
+    "id": 29,
+    "a": {
+     "at": "terminal",
+     "comp": 17,
+     "terminal": "a"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO3"
+    },
+    "color": [
+     60,
+     170,
+     80
+    ],
+    "waypoints": [
+     [
+      70.0,
+      -66.0
+     ],
+     [
+      136.0,
+      -66.0
+     ],
+     [
+      136.0,
+      -36.18
+     ]
+    ],
+    "label": "ARM",
+    "spec": "ARM sense wire, 24-26 AWG; R7/R8 junction to GPIO3 (ADC1 ch3): 12 V reads 2.11 V"
+   },
+   "30": {
+    "id": 30,
+    "a": {
+     "at": "terminal",
+     "comp": 18,
+     "terminal": "a"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO20"
+    },
+    "color": [
+     175,
+     130,
+     255
+    ],
+    "waypoints": [],
+    "label": "DUMP",
+    "spec": "24-26 AWG; GPIO20 (internal pull-up) to the DUMP button S2"
+   },
+   "31": {
+    "id": 31,
+    "a": {
+     "at": "terminal",
+     "comp": 18,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GND1"
+    },
+    "color": [
+     40,
+     40,
+     44
+    ],
+    "waypoints": [
+     [
+      193.0,
+      -34.0
+     ],
+     [
+      193.0,
+      2.0
+     ],
+     [
+      134.0,
+      2.0
+     ],
+     [
+      134.0,
+      -23.48
+     ]
+    ],
+    "label": "DUMP-GND",
+    "spec": "24-26 AWG; DUMP button S2 to GND"
+   },
+   "32": {
+    "id": 32,
+    "a": {
+     "at": "terminal",
+     "comp": 19,
+     "terminal": "signal"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "GPIO18"
+    },
+    "color": [
+     70,
+     200,
+     220
+    ],
+    "waypoints": [
+     [
+      -8.0,
+      -72.54
+     ],
+     [
+      -8.0,
+      -99.0
+     ],
+     [
+      175.0,
+      -99.0
+     ],
+     [
+      175.0,
+      -38.72
+     ]
+    ],
+    "label": "K2-IN",
+    "spec": "24-26 AWG; GPIO18 to K2 IN; high = K2 energized = dump open"
+   },
+   "33": {
+    "id": 33,
+    "a": {
+     "at": "terminal",
+     "comp": 19,
+     "terminal": "vcc"
+    },
+    "b": {
+     "at": "board_pin",
+     "key": "5V"
+    },
+    "color": [
+     220,
+     60,
+     150
+    ],
+    "waypoints": [
+     [
+      -4.0,
+      -67.46
+     ],
+     [
+      -4.0,
+      -95.0
+     ],
+     [
+      135.0,
+      -95.0
+     ],
+     [
+      135.0,
+      -20.94
+     ]
+    ],
+    "label": "K2-VCC",
+    "spec": "24-26 AWG; 5 V to K2 VCC (~70 mA coil)"
+   },
+   "34": {
+    "id": 34,
+    "a": {
+     "at": "terminal",
+     "comp": 19,
+     "terminal": "gnd"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 1,
+     "terminal": "neg"
+    },
+    "color": [
+     40,
+     40,
+     44
+    ],
+    "waypoints": [
+     [
+      -6.0,
+      -70.0
+     ],
+     [
+      -6.0,
+      -62.0
+     ]
+    ],
+    "label": "K2-GND",
+    "spec": "24-26 AWG; K2 GND to GND"
+   },
+   "35": {
+    "id": 35,
+    "a": {
+     "at": "terminal",
+     "comp": 19,
+     "terminal": "common"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 4,
+     "terminal": "pos"
+    },
+    "color": [
+     210,
+     40,
+     40
+    ],
+    "waypoints": [
+     [
+      -64.0,
+      -70.0
+     ],
+     [
+      -64.0,
+      -50.0
+     ],
+     [
+      -23.46,
+      -50.0
+     ]
+    ],
+    "label": "K2-COM",
+    "spec": "20-22 AWG, insulation >=300 V; bank + to K2 COM"
+   },
+   "36": {
+    "id": 36,
+    "a": {
+     "at": "terminal",
+     "comp": 19,
+     "terminal": "normally_closed"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 20,
+     "terminal": "a"
+    },
+    "color": [
+     150,
+     80,
+     200
+    ],
+    "waypoints": [
+     [
+      -67.08,
+      -75.0
+     ]
+    ],
+    "label": "K2-NC",
+    "spec": "20-22 AWG, insulation >=300 V; K2 NC to the dump resistor R6"
+   },
+   "37": {
+    "id": 37,
+    "a": {
+     "at": "terminal",
+     "comp": 20,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 5,
+     "terminal": "neg"
+    },
+    "color": [
+     40,
+     40,
+     44
+    ],
+    "waypoints": [
+     [
+      -48.54,
+      -44.0
+     ]
+    ],
+    "label": "R6-RTN",
+    "spec": "20-22 AWG, insulation >=300 V; R6 to bank -; 0.3 A / 90 W peak, 8.5 J per dump from 300 V"
+   },
+   "38": {
+    "id": 38,
+    "a": {
+     "at": "terminal",
+     "comp": 21,
+     "terminal": "a"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "signal"
+    },
+    "color": [
+     235,
+     235,
+     235
+    ],
+    "waypoints": [
+     [
+      118.92,
+      -24.54
+     ]
+    ],
+    "label": "PD1-IN",
+    "spec": "R9 10 k pull-down lead soldered to K1's IN pin"
+   },
+   "39": {
+    "id": 39,
+    "a": {
+     "at": "terminal",
+     "comp": 21,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 2,
+     "terminal": "gnd"
+    },
+    "color": [
+     40,
+     40,
+     44
+    ],
+    "waypoints": [
+     [
+      129.08,
+      -22.0
+     ]
+    ],
+    "label": "PD1-GND",
+    "spec": "R9 lead soldered to K1's GND pin; K1 stays open through reset and boot"
+   },
+   "40": {
+    "id": 40,
+    "a": {
+     "at": "terminal",
+     "comp": 22,
+     "terminal": "a"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 19,
+     "terminal": "signal"
+    },
+    "color": [
+     70,
+     200,
+     220
+    ],
+    "waypoints": [
+     [
+      -8.0,
+      -89.0
+     ],
+     [
+      -8.0,
+      -72.54
+     ]
+    ],
+    "label": "PD2-IN",
+    "spec": "R10 10 k pull-down lead soldered to K2's IN pin"
+   },
+   "41": {
+    "id": 41,
+    "a": {
+     "at": "terminal",
+     "comp": 22,
+     "terminal": "b"
+    },
+    "b": {
+     "at": "terminal",
+     "comp": 19,
+     "terminal": "gnd"
+    },
+    "color": [
+     40,
+     40,
+     44
+    ],
+    "waypoints": [
+     [
+      -27.0,
+      -89.0
+     ],
+     [
+      -27.0,
+      -103.0
+     ],
+     [
+      -6.0,
+      -103.0
+     ],
+     [
+      -6.0,
+      -70.0
+     ]
+    ],
+    "label": "PD2-GND",
+    "spec": "R10 lead soldered to K2's GND pin; K2 stays released (dumping) through reset and boot"
    }
   },
-  "next_comp": 15,
-  "next_wire": 25,
+  "next_comp": 23,
+  "next_wire": 42,
   "net_names": {
    "V12_RAW": {
     "at": "terminal",
@@ -714,16 +1374,41 @@
     "at": "terminal",
     "comp": 12,
     "terminal": "tip"
+   },
+   "V12_ARM": {
+    "at": "terminal",
+    "comp": 15,
+    "terminal": "b"
+   },
+   "ARM_SENSE": {
+    "at": "terminal",
+    "comp": 17,
+    "terminal": "a"
+   },
+   "DUMP_BTN": {
+    "at": "terminal",
+    "comp": 18,
+    "terminal": "a"
+   },
+   "K2_IN": {
+    "at": "terminal",
+    "comp": 19,
+    "terminal": "signal"
+   },
+   "DUMP_R": {
+    "at": "terminal",
+    "comp": 20,
+    "terminal": "a"
    }
   },
   "schematic": {
    "title": "DIY capacitor-discharge pulse-arc welder (jewelry)",
-   "revision": "A",
-   "date": "2026-11-23",
+   "revision": "B",
+   "date": "2026-11-25",
    "board_ref": "U2",
    "paper": "A3",
    "board_at": [
-    381.0,
+    358.14,
     76.2
    ],
    "parts": {
@@ -791,11 +1476,54 @@
      208.28,
      125.73,
      180
+    ],
+    "S1": [
+     60.96,
+     33.02,
+     0
+    ],
+    "R7": [
+     119.38,
+     33.02,
+     90
+    ],
+    "R8": [
+     134.62,
+     45.72,
+     0
+    ],
+    "R9": [
+     116.84,
+     96.52,
+     90
+    ],
+    "K2": [
+     279.4,
+     124.46,
+     0
+    ],
+    "R6": [
+     317.5,
+     124.46,
+     90
+    ],
+    "R10": [
+     240.03,
+     142.24,
+     90
+    ],
+    "S2": [
+     330.2,
+     144.78,
+     0
     ]
    },
    "pin_notes": {
-    "GPIO1": "ADC pin TBD (sim uses GPIO1; free ADC1: GPIO0-3)",
-    "GPIO19": "control pin TBD (sim uses GPIO19)"
+    "GPIO1": "BANK sense (ADC1 ch1)",
+    "GPIO3": "ARM sense (ADC1 ch3)",
+    "GPIO18": "K2 dump relay",
+    "GPIO19": "K1 charge relay",
+    "GPIO20": "DUMP button"
    },
    "exclude": [
     "fw"
@@ -804,15 +1532,17 @@
     {
      "title": "Firmware behaviour (modelled in WireLab)",
      "lines": [
-      "1. K1 off at boot (SAFE).",
-      "2. After 1 s, close K1 and charge to the user set point (CHARGE).",
-      "3. Open K1 at set point - 3 V, predicted ahead by half a sample step plus the 10 ms relay release.",
-      "4. Hard cutoff: K1 open and FAULT latched above 310 V, in every state.",
-      "5. 30 s charge timeout -> FAULT; no rise past 30 V within 0.8 s -> FAULT (pen on work / short).",
-      "6. LCD: state bar, bank volts, stored joules, set point, bar graph, weld count, raw ADC mV.",
-      "7. Two-point ADC calibration constants (mv_lo/v_lo, mv_hi/v_hi) from meter readings.",
+      "1. Boot: K1 and K2 released (K2 released = bank dumping through R6); disarmed until S1 reads OFF (from 1 s after boot), then ON.",
+      "2. ARM switch S1 read on GPIO3 through R7/R8 (12 V -> 2.11 V): ON above 8 V, OFF below 6 V.",
+      "3. Arming (S1 ON, no latch, DUMP not held, no fault): wait until the bank is < 5 V, energize K2, wait 60 ms, close K1 (CHARGE).",
+      "4. Open K1 once V + rise rate x (10 ms relay release + sample interval) reaches set point - 3 V; the rate is the positive slope, lightly smoothed (READY).",
+      "5. Disarm (S1 OFF, DUMP, any FAULT): K1 off at once, K2 released 20 ms later; DUMPING until < 5 V for 200 ms, then SAFE.",
+      "6. A DUMP press latches: disarmed until S1 reads OFF and then ON; nothing arms while DUMP is held.",
+      "7. Dump stalled (not halved in 1 s, or > 30 V after 3 s): FAULT DUMP STALLED, \"switch ARM off\".",
+      "8. Hard cutoff above 310 V; 30 s charge timeout; no rise past 30 V within 0.8 s (pen on work / short): FAULT.",
+      "9. Faults clear when S1 goes ON -> OFF (once the bank is < 310 V) or on a 1 s BOOT hold; arming again needs S1 OFF -> ON. A short BOOT press cycles 120/180/240/280 V.",
       "READY keeps K1 open; a >= 20 V drop between samples counts as a weld -> HOLD 1.5 s -> recharge.",
-      "BOOT button: cycles the set point; clears a latched FAULT once the bank is under 310 V."
+      "LCD: state bar, bank volts, stored joules, set point, bar graph, weld count, raw ADC mV and ARM supply volts."
      ],
      "at": [
       12.7,
@@ -824,6 +1554,7 @@
      "title": "Grounding",
      "lines": [
       "U1 is non-isolated: PS1 -, the bank -, the pen and the ESP32 GND are ONE node.",
+      "K2, R8, R9, R10 and the DUMP button return to that same node.",
       "PS1 must be floating. Never connect U2's USB to a PC while the bank is energized.",
       "DCEN: pen (electrode) on -, work clamp on +.",
       "Weld leads W1/W2 (12 AWG silicone, 600 V) solder straight to cap legs of opposite caps, never through board copper. Keep them short and twisted."
@@ -838,18 +1569,19 @@
      "title": "Safety flags",
      "lines": [
       "- Shock: with DCEN the clamp and the workpiece sit at +300 V against the pen, the ESP32 GND/USB-C shell, the power bank and PS1 -. Never hold the work in a bare hand while the bank is charged; the pen's metal pin vise is on the - node.",
-      "- The bank holds charge after K1 opens: bleed tau = 302 k x 190 uF = 57 s, so 300 V takes ~122 s to reach 36 V and ~4 min to reach 5 V. U1's own output capacitors (value unknown) are on the same node. Measure before touching.",
-      "- Discharge tool: 10 k across 300 V starts at 9 W and dumps 8.5 J (tau 1.9 s). Use a >=5 W wirewound or ceramic 10 k, not a 1/4 W part, and use it on U1's output too.",
+      "- K2 dumps the bank through R6 (1 k x 190 uF, tau 0.19 s: 300 V -> < 5 V in ~0.8 s) whenever it is released: disarm, DUMP, fault, reset, panic or power loss. The 302 k bleeder (tau 57 s) stays as the backup; U1's own output capacitors are on the same node. Measure before touching.",
+      "- R6 takes 8.5 J per dump from 300 V, 0.3 A / 90 W for an instant: use a >= 10 W cement or wirewound 1 k rated for >= 330 V, mounted in the case away from plastic.",
+      "- S1 is the hardware interlock: with S1 off the charger has no input power whatever the firmware does. S1 must be rated >= 5 A at 12 V DC.",
+      "- Never energize K2 while the bank is >= 5 V: K2's contacts are rated 10 A at 30 V DC, so opening a live 300 V dump current could arc. The firmware waits for < 5 V first.",
+      "- R9/R10 (10 k) hold K1.IN and K2.IN low through reset and boot: K1 stays open and K2 stays released (dumping) until the firmware runs. Confirm both modules switch reliably from 3.3 V.",
       "- U1 can reach 390 V but C1/C2 are rated 330 V: U1's pot is the only hardware limit. Set it to ~300 V unloaded, then lock it (glue or paint).",
       "- Near the set point the bank rises ~500-700 V/s; at a 10 ms loop the relay cutoff overshoots 5-7 V. Sample fast (>=1 kHz) or keep the set point well under U1's pot setting. The 310 V cutoff is only 10 V above the 300 V ceiling.",
       "- Board clearance: 2.54 mm pitch gives < 3 mm between neighbouring strips and between the + and - rails. A 300 V + rail beside the - rail breaks the 3 mm rule whatever the copper width (see the perfboard check).",
       "- The underside C1+<->C2+ and C1-<->C2- jumpers each carry about half of the weld pulse (simulated peak ~1 kA total). Use 12 AWG or bend the cap legs together; thin jumper wire will fuse.",
-      "- Wire insulation on every 300 V jumper (blue, brown, U1 output) must be rated >= 300 V; silicone 600 V wire is the safe pick. Their gauges are not in the handoff.",
+      "- Wire insulation on every 300 V jumper (blue, brown, U1 output, K2 COM/NC, R6) must be rated >= 300 V; silicone 600 V wire is the safe pick.",
       "- D1 (Vf ~0.6 V) clamps ADC_IN near 3.9 V, above the C6's 3.6 V absolute maximum. R5 limits the excess current to well under 1 mA so the pin survives, but a Schottky (BAT54/BAT85) clamps tighter, and the clamp current flows into the 3V3 rail.",
-      "- K1 must stay off while the C6 boots or resets: a GPIO's state is undefined until the firmware runs. A 10 k pull-down from K1.IN to GND (not in the BOM) makes that hardware-guaranteed. Also confirm the module switches reliably from 3.3 V.",
       "- PS1 must truly float: check with a meter that PS1 - has no continuity to the plug's earth pin (many bricks tie it through the barrel or a Y-capacitor).",
-      "- 12 AWG weld leads are stiff: strain-relieve them so they do not lever the photoflash cap legs or their solder joints.",
-      "- There is no arm/disarm control: the modelled firmware charges automatically 1 s after boot. Consider a key switch or a long-press to arm."
+      "- 12 AWG weld leads are stiff: strain-relieve them so they do not lever the photoflash cap legs or their solder joints."
      ],
      "at": [
       144.78,
@@ -860,18 +1592,13 @@
     {
      "title": "Open items (TBD - not guessed)",
      "lines": [
-      "- ADC GPIO for ADC_IN: free ADC1 pins on the C6-LCD-1.47 are GPIO0-3 (GPIO4/5 are the SD card, GPIO6 the LCD bus). The sim uses GPIO1.",
-      "- Control GPIO for K1.IN: free pads are GPIO0-3, 18-20, 23. The sim uses GPIO19. Check boot-time levels of the chosen pin.",
       "- Confirm with a meter that U1's VIN- and VOUT- are internally common (the drawing ties both to GND, as the netlist does).",
-      "- R5 and D1 positions on the perfboard are not in the handoff. Suggested: run TAP (A/B/C18) to the ESP32 side and fit R5 + D1 beside the ADC pin.",
-      "- Exact holes for C1/C2 (rows 23-30) and the rail rows of the blue, green and U1 output jumpers.",
-      "- How U2 mounts on the F-J half, and where U2 GND meets the - rail.",
-      "- Gauges of the board jumpers and of the 12 V wiring (PS1 -> K1 -> U1 carries ~3 A while charging).",
-      "- Set-point input: not specified. The sim cycles presets 120/180/240/280 V with the BOOT button.",
+      "- Where S1, S2, K2 and R6 mount in the case, and the 12 V wire gauge through S1 (PS1 -> S1 -> K1 -> U1 carries ~3 A while charging).",
+      "- K1 and K2 modules: 51 x 26 x 19 mm with a 3.1 mm hole in each corner; measure the hole centre spacing before drilling the case.",
+      "- Set-point input: not specified. The model cycles presets 120/180/240/280 V with a short BOOT press.",
       "- Firmware margin, top-up and hold-off values are sim defaults (3 V, 8 V, 1.5 s), not requirements.",
-      "- Which cap takes the pen and which the clamp: the handoff only says opposite caps. Drawn: pen on C1 -, clamp on C2 +.",
-      "- Photoflash ESR, contact resistance and arc voltage are assumed model values; the simulated peak current scales with them.",
-      "- Retired: the salvaged disposable-camera flash booster is removed from every drawing."
+      "- Which cap takes the pen and which the clamp: the handoff only says opposite caps. Drawn: pen on C2 -, clamp on C1 +.",
+      "- Photoflash ESR, contact resistance and arc voltage are assumed model values; the simulated peak current scales with them."
      ],
      "at": [
       279.4,
@@ -882,32 +1609,28 @@
    ],
    "flags": [
     "Shock: with DCEN the clamp and the workpiece sit at +300 V against the pen, the ESP32 GND/USB-C shell, the power bank and PS1 -. Never hold the work in a bare hand while the bank is charged; the pen's metal pin vise is on the - node.",
-    "The bank holds charge after K1 opens: bleed tau = 302 k x 190 uF = 57 s, so 300 V takes ~122 s to reach 36 V and ~4 min to reach 5 V. U1's own output capacitors (value unknown) are on the same node. Measure before touching.",
-    "Discharge tool: 10 k across 300 V starts at 9 W and dumps 8.5 J (tau 1.9 s). Use a >=5 W wirewound or ceramic 10 k, not a 1/4 W part, and use it on U1's output too.",
+    "K2 dumps the bank through R6 (1 k x 190 uF, tau 0.19 s: 300 V -> < 5 V in ~0.8 s) whenever it is released: disarm, DUMP, fault, reset, panic or power loss. The 302 k bleeder (tau 57 s) stays as the backup; U1's own output capacitors are on the same node. Measure before touching.",
+    "R6 takes 8.5 J per dump from 300 V, 0.3 A / 90 W for an instant: use a >= 10 W cement or wirewound 1 k rated for >= 330 V, mounted in the case away from plastic.",
+    "S1 is the hardware interlock: with S1 off the charger has no input power whatever the firmware does. S1 must be rated >= 5 A at 12 V DC.",
+    "Never energize K2 while the bank is >= 5 V: K2's contacts are rated 10 A at 30 V DC, so opening a live 300 V dump current could arc. The firmware waits for < 5 V first.",
+    "R9/R10 (10 k) hold K1.IN and K2.IN low through reset and boot: K1 stays open and K2 stays released (dumping) until the firmware runs. Confirm both modules switch reliably from 3.3 V.",
     "U1 can reach 390 V but C1/C2 are rated 330 V: U1's pot is the only hardware limit. Set it to ~300 V unloaded, then lock it (glue or paint).",
     "Near the set point the bank rises ~500-700 V/s; at a 10 ms loop the relay cutoff overshoots 5-7 V. Sample fast (>=1 kHz) or keep the set point well under U1's pot setting. The 310 V cutoff is only 10 V above the 300 V ceiling.",
     "Board clearance: 2.54 mm pitch gives < 3 mm between neighbouring strips and between the + and - rails. A 300 V + rail beside the - rail breaks the 3 mm rule whatever the copper width (see the perfboard check).",
     "The underside C1+<->C2+ and C1-<->C2- jumpers each carry about half of the weld pulse (simulated peak ~1 kA total). Use 12 AWG or bend the cap legs together; thin jumper wire will fuse.",
-    "Wire insulation on every 300 V jumper (blue, brown, U1 output) must be rated >= 300 V; silicone 600 V wire is the safe pick. Their gauges are not in the handoff.",
+    "Wire insulation on every 300 V jumper (blue, brown, U1 output, K2 COM/NC, R6) must be rated >= 300 V; silicone 600 V wire is the safe pick.",
     "D1 (Vf ~0.6 V) clamps ADC_IN near 3.9 V, above the C6's 3.6 V absolute maximum. R5 limits the excess current to well under 1 mA so the pin survives, but a Schottky (BAT54/BAT85) clamps tighter, and the clamp current flows into the 3V3 rail.",
-    "K1 must stay off while the C6 boots or resets: a GPIO's state is undefined until the firmware runs. A 10 k pull-down from K1.IN to GND (not in the BOM) makes that hardware-guaranteed. Also confirm the module switches reliably from 3.3 V.",
     "PS1 must truly float: check with a meter that PS1 - has no continuity to the plug's earth pin (many bricks tie it through the barrel or a Y-capacitor).",
-    "12 AWG weld leads are stiff: strain-relieve them so they do not lever the photoflash cap legs or their solder joints.",
-    "There is no arm/disarm control: the modelled firmware charges automatically 1 s after boot. Consider a key switch or a long-press to arm."
+    "12 AWG weld leads are stiff: strain-relieve them so they do not lever the photoflash cap legs or their solder joints."
    ],
    "open_items": [
-    "ADC GPIO for ADC_IN: free ADC1 pins on the C6-LCD-1.47 are GPIO0-3 (GPIO4/5 are the SD card, GPIO6 the LCD bus). The sim uses GPIO1.",
-    "Control GPIO for K1.IN: free pads are GPIO0-3, 18-20, 23. The sim uses GPIO19. Check boot-time levels of the chosen pin.",
     "Confirm with a meter that U1's VIN- and VOUT- are internally common (the drawing ties both to GND, as the netlist does).",
-    "R5 and D1 positions on the perfboard are not in the handoff. Suggested: run TAP (A/B/C18) to the ESP32 side and fit R5 + D1 beside the ADC pin.",
-    "Exact holes for C1/C2 (rows 23-30) and the rail rows of the blue, green and U1 output jumpers.",
-    "How U2 mounts on the F-J half, and where U2 GND meets the - rail.",
-    "Gauges of the board jumpers and of the 12 V wiring (PS1 -> K1 -> U1 carries ~3 A while charging).",
-    "Set-point input: not specified. The sim cycles presets 120/180/240/280 V with the BOOT button.",
+    "Where S1, S2, K2 and R6 mount in the case, and the 12 V wire gauge through S1 (PS1 -> S1 -> K1 -> U1 carries ~3 A while charging).",
+    "K1 and K2 modules: 51 x 26 x 19 mm with a 3.1 mm hole in each corner; measure the hole centre spacing before drilling the case.",
+    "Set-point input: not specified. The model cycles presets 120/180/240/280 V with a short BOOT press.",
     "Firmware margin, top-up and hold-off values are sim defaults (3 V, 8 V, 1.5 s), not requirements.",
-    "Which cap takes the pen and which the clamp: the handoff only says opposite caps. Drawn: pen on C1 -, clamp on C2 +.",
-    "Photoflash ESR, contact resistance and arc voltage are assumed model values; the simulated peak current scales with them.",
-    "Retired: the salvaged disposable-camera flash booster is removed from every drawing."
+    "Which cap takes the pen and which the clamp: the handoff only says opposite caps. Drawn: pen on C2 -, clamp on C1 +.",
+    "Photoflash ESR, contact resistance and arc voltage are assumed model values; the simulated peak current scales with them."
    ]
   },
   "perf": {
@@ -1044,6 +1767,14 @@
       30.0
      ],
      "note": "floating 12 V brick"
+    },
+    {
+     "part": "S1",
+     "at": [
+      8.0,
+      75.0
+     ],
+     "note": "ARM toggle, panel mount, >= 5 A at 12 V DC"
     },
     {
      "part": "K1",
@@ -1191,12 +1922,22 @@
     {
      "id": "12V-A",
      "from": "PS1.pos",
+     "to": "S1.a",
+     "color": "yellow",
+     "side": "offboard",
+     "spec": "TBD (~3 A: 18 AWG or heavier)",
+     "carries": "~2.9 A while charging (sim)",
+     "note": "V12_RAW, to the ARM switch"
+    },
+    {
+     "id": "12V-ARM",
+     "from": "S1.b",
      "to": "K1.common",
      "color": "yellow",
      "side": "offboard",
      "spec": "TBD (~3 A: 18 AWG or heavier)",
      "carries": "~2.9 A while charging (sim)",
-     "note": "V12_RAW"
+     "note": "V12_ARM, switched by S1"
     },
     {
      "id": "12V-B",
@@ -1316,7 +2057,8 @@
     "Weld leads go straight to cap legs (opposite caps), never through pads or rail copper: the pulse is hundreds of amps.",
     "Keep >= 3 mm around every 300 V node. Leave rows 11 and 13 empty beside the row-12 HV strip.",
     "U1 sits off-board on its four M3 holes; short wires from its output to the rails.",
-    "Retired: the disposable-camera flash booster and its pads/wires are gone."
+    "Retired: the disposable-camera flash booster and its pads/wires are gone.",
+    "Controls rev B (S1, R7/R8, S2, K2, R6, R9/R10) mount off this board; example 22 places them on the ElectroCookie build."
    ]
   }
  },
